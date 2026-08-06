@@ -82,6 +82,8 @@
   .seg button.on{background:var(--ink);color:#fff;border-color:var(--ink)}
 
   #reader{width:100%;border-radius:12px;overflow:hidden;background:#000;min-height:240px}
+  #reader video{width:100% !important;height:auto !important;display:block}
+  #reader img[alt="Info icon"],#reader__dashboard_section_csr span{display:none}
   .food{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:6px}
   .food.sel{border-color:var(--moss)}
   .banner{background:var(--clay-soft);border:1px solid var(--clay);color:var(--clay);
@@ -226,6 +228,14 @@ function render(){
   v.innerHTML = tab==='today'?viewToday():tab==='foods'?viewFoods():tab==='body'?viewBody():viewSetup();
   document.querySelectorAll('nav button').forEach(b=>b.classList.toggle('on',b.dataset.tab===tab));
   $('#sheet').innerHTML = sheet?sheetHTML():'';
+}
+
+/* Updates the scanner status line in place. A full render() would rebuild the
+   sheet and destroy the <video> the scanner library injected into #reader. */
+function setStatus(t){
+  sh.status=t;
+  const el=document.querySelector('#scanstatus');
+  if(el)el.textContent=t;
 }
 
 function barHTML(val,tgt,over){
@@ -517,7 +527,7 @@ function addSheet(){
 
     ${sh.mode==='scan'?`
       <div id="reader"></div>
-      <div class="small" style="margin-top:10px;min-height:20px;color:var(--moss)">${esc(sh.status)}</div>
+      <div id="scanstatus" class="small" style="margin-top:10px;min-height:20px;color:var(--moss)">${esc(sh.status)}</div>
       <div style="margin-top:8px"><div class="lab" style="margin-bottom:4px">Or type the barcode</div>
         <div style="display:flex;gap:8px"><input id="manualcode" inputmode="numeric" placeholder="0123456789012">
         <button class="btn sm" data-act="lookupmanual">Look up</button></div></div>
@@ -611,7 +621,8 @@ function addEntry(food,qty,meal,keep){
 
 /* ---- Open Food Facts ---- */
 async function lookup(code){
-  sh.status='Looking up '+code+'\u2026';render();
+  stopScanner();
+  setStatus('Looking up '+code+'\u2026');
   try{
     const url='https://world.openfoodfacts.org/api/v2/product/'+encodeURIComponent(code)+
       '.json?fields=product_name,brands,serving_size,nutriments';
@@ -619,7 +630,7 @@ async function lookup(code){
     const j=await r.json();
     /* A missing barcode still returns HTTP 200, so check the body. */
     if(j.status!==1||!j.product){
-      sh.status='Not in the database. Add it under New and it saves for next time.';render();return;
+      setStatus('Not in the database. Add it under New and it saves for next time.');return;
     }
     const p=j.product, n=p.nutriments||{};
     const per=k=>n[k+'_serving'];
@@ -640,7 +651,7 @@ async function lookup(code){
     const warn=hasServing?'':'These numbers are per 100 g, not per serving. Adjust before saving.';
     if(warn){const el=document.querySelector('#n_serving');if(el)el.focus();alert(warn);}
   }catch(e){
-    sh.status='Lookup failed. Check your connection, or type the numbers under New.';render();
+    setStatus('Lookup failed. Check your connection, or type the numbers under New.');
   }
 }
 
@@ -652,9 +663,11 @@ function loadScript(src){return new Promise((res,rej)=>{
 async function startScanner(){
   if(sh.scanning)return;
   sh.scanning=true;
-  sh.status='Starting camera\u2026';render();
+  setStatus('Starting camera\u2026');
   try{
     if(!window.Html5Qrcode) await loadScript('https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js');
+    /* The sheet may have closed while the library was downloading. */
+    if(!document.querySelector('#reader')){sh.scanning=false;return;}
     const F=window.Html5QrcodeSupportedFormats;
     scanner=new window.Html5Qrcode('reader',{
       formatsToSupport:[F.EAN_13,F.EAN_8,F.UPC_A,F.UPC_E,F.CODE_128],
@@ -664,10 +677,10 @@ async function startScanner(){
     await scanner.start({facingMode:'environment'},{fps:10,qrbox:{width:260,height:160}},
       code=>{if(!sh.scanning)return;sh.scanning=false;lookup(code);},
       ()=>{});
-    sh.status='Point at the barcode.';render();
+    setStatus('Point at the barcode.');
   }catch(e){
     sh.scanning=false;
-    sh.status='Camera unavailable. Type the barcode below instead.';render();
+    setStatus('Camera unavailable. Type the barcode below instead.');
   }
 }
 function stopScanner(){
