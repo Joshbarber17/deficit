@@ -1,3 +1,4 @@
+[README_1.md](https://github.com/user-attachments/files/30837570/README_1.md)
 # Deficit — setup
 
 One file, no build step, no server, no cost. Everything below is free.
@@ -39,12 +40,22 @@ Go to **Setup**, fill in weight, height, age, and pick your deficit. Since you'r
 
 Use **Active Energy**, not Total. Total includes the calories you burn just existing, and those are already inside your ceiling.
 
-## 5. Back up
+## 5. Turn on food search (optional, 2 minutes)
+
+The Search tab inside Add Food pulls generic foods from USDA FoodData Central: raw apples, dry-roasted pistachios, a chicken breast. It works out of the box on a shared key capped around 50 lookups a day. For your own:
+
+1. Go to fdc.nal.usda.gov/api-key-signup, enter your name and email. The key arrives by email immediately.
+2. In the app: **Setup** → **Food search key** → paste → Save key.
+
+That raises the limit to 1,000 lookups an hour. The key is stored on your phone only. Do not put it in `index.html` in the repo, the repo is public and USDA deactivates keys it finds in public code.
+
+## 6. Back up
 
 **Setup** → **Export a copy** saves a JSON file to your phone. Do this monthly. Your data lives in one browser on one device; there's no cloud copy. Restore from that same screen.
 
 ## Notes
 
+- **Search**: generic, unbranded foods from USDA. Pick a food and you get its real portions, "1 medium apple", "1 cup chopped", plus a plain ounce or gram amount, and macros for each. Names come through long and clinical; edit them on the next screen before saving.
 - **Scanner**: uses your phone's native barcode reader where available and a fallback library on iOS. Barcode data comes from Open Food Facts, a free community database. US coverage is decent but incomplete, and some entries store per-100g values rather than per-serving, so check the numbers before saving. Anything not found can be typed once and saved forever.
 - **Exercise estimates**: net MET values from the Adult Compendium of Physical Activities, scaled to your body weight. Net means resting calories are subtracted, because those are already counted in your base target.
 - **Eat-back**: defaults to 75%. Watch estimates run generous. If the scale and tape aren't moving after a month, lower this before you lower your calories.
