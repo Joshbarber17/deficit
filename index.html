@@ -67,6 +67,10 @@
   .x{background:none;border:0;color:var(--line);cursor:pointer;font-size:18px;padding:0 2px;line-height:1}
   .plus{background:var(--moss-soft);color:var(--moss);border:0;width:27px;height:27px;border-radius:999px;
       font-size:17px;line-height:1;cursor:pointer;font-weight:600}
+  .step{background:var(--card);color:var(--ink);border:1px solid var(--line);width:38px;height:38px;
+      border-radius:9px;font-size:19px;line-height:1;cursor:pointer;font-weight:600;font-family:inherit;
+      flex:0 0 auto}
+  .step:active{background:var(--moss-soft)}
 
   .dots{display:flex;gap:5px}
   .dot{width:20px;height:20px;border-radius:999px;border:1px solid var(--line)}
@@ -76,16 +80,18 @@
   .sheet-bg{position:fixed;inset:0;background:rgba(20,24,28,.45);z-index:30;display:flex;align-items:flex-end;justify-content:center}
   .sheet{width:100%;max-width:640px;background:var(--paper);border-radius:18px 18px 0 0;
       max-height:90vh;overflow-y:auto;padding:16px 14px calc(24px + env(safe-area-inset-bottom))}
-  .seg{display:flex;gap:6px;margin-bottom:14px}
+  .seg{display:flex;gap:5px;margin-bottom:14px}
   .seg button{flex:1;padding:9px 0;border-radius:8px;border:1px solid var(--line);background:none;
-      color:var(--muted);font-weight:600;font-size:13px;cursor:pointer;font-family:inherit}
+      color:var(--muted);font-weight:600;font-size:12px;cursor:pointer;font-family:inherit}
   .seg button.on{background:var(--ink);color:#fff;border-color:var(--ink)}
 
   #reader{width:100%;border-radius:12px;overflow:hidden;background:#000;min-height:240px}
-  #reader video{width:100% !important;height:auto !important;display:block}
-  #reader img[alt="Info icon"],#reader__dashboard_section_csr span{display:none}
   .food{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:6px}
   .food.sel{border-color:var(--moss)}
+  .portion{display:flex;align-items:center;gap:10px;width:100%;text-align:left;background:var(--card);
+      border:1px solid var(--line);border-radius:9px;padding:10px 12px;margin-bottom:6px;
+      font-family:inherit;font-size:14px;color:var(--ink);cursor:pointer}
+  .portion:active{border-color:var(--moss);background:var(--moss-soft)}
   .banner{background:var(--clay-soft);border:1px solid var(--clay);color:var(--clay);
       border-radius:10px;padding:10px 12px;font-size:13px;margin-bottom:10px}
   .note{background:var(--moss-soft);border-radius:10px;padding:12px 14px;font-size:13px;color:var(--moss)}
@@ -103,7 +109,6 @@
 <nav>
   <button data-tab="today" class="on">Today</button>
   <button data-tab="foods">Foods</button>
-  <button data-tab="body">Body</button>
   <button data-tab="setup">Setup</button>
 </nav>
 
@@ -149,7 +154,9 @@ function save(){
 
 /* ============================== model ============================== */
 const DEFAULTS={
-  settings:{cal:2200,protein:170,carbs:200,fat:70,lb:190,heightIn:71,eatBack:75,lastBackup:0},
+  settings:{cal:2200,protein:170,carbs:200,fat:70,lb:190,heightIn:71,eatBack:75,lastBackup:0,fdcKey:''},
+  /* body: kept in the model so old backups restore cleanly and a future
+     weight / body-fat screen has somewhere to write. No UI reads it now. */
   foods:[], logs:{}, ex:{}, body:{}
 };
 let S=JSON.parse(JSON.stringify(DEFAULTS));
@@ -168,6 +175,38 @@ const uid=()=>Math.random().toString(36).slice(2,10);
 const nm=v=>{const n=parseFloat(v);return isNaN(n)?0:n;};
 const r0=n=>Math.round(n);
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const r1=n=>Math.round(n*10)/10;
+
+/* Units that read wrong when pluralized: "24 count", not "24 counts". */
+const NOPLURAL=new Set(['g','kg','mg','oz','lb','ml','l','fl','tbsp','tsp','count','each','pkg','ct']);
+const OES=new Set(['potato','tomato','mango','hero']);
+const fmtNum=n=>String(Math.round(n*100)/100);
+
+/* "1 large egg (50 g)" at 3 servings reads as "3 large eggs (150 g)".
+   Every number in the string scales; the last word before any parenthesis
+   gets an s unless it's a unit abbreviation. No number to scale means we
+   fall back to "3 x whatever". */
+function scaleServing(serving,qty){
+  const q=nm(qty);
+  let s=String(serving||'').trim()||'1 serving';
+  if(!q||q===1)return s;
+  let found=false;
+  let out=s.replace(/(\d+(?:\.\d+)?)\s*\/\s*(\d+(?:\.\d+)?)|(\d+(?:\.\d+)?)/g,(m,a,b,c)=>{
+    found=true;
+    return fmtNum((a!==undefined?parseFloat(a)/parseFloat(b):parseFloat(c))*q);
+  });
+  if(!found)return fmtNum(q)+' \u00d7 '+s;
+  return out.replace(/^([^(,]*)/,head=>{
+    const m=head.match(/^(.*?)([A-Za-z]+)(\s*)$/);
+    if(!m)return head;
+    const w=m[2];
+    /* leave alone: already plural, a unit, or a participle like "cooked" */
+    if(/(s|ed)$/i.test(w)||NOPLURAL.has(w.toLowerCase()))return head;
+    const plural=/[^aeiou]y$/i.test(w)?w.slice(0,-1)+'ies':
+                 (/(ch|sh|x|z)$/i.test(w)||OES.has(w.toLowerCase()))?w+'es':w+'s';
+    return m[1]+plural+m[3];
+  });
+}
 
 /* Net METs (MET - 1): resting burn is already inside the base target. */
 const ACTS=[
@@ -225,17 +264,9 @@ function streakInfo(){
 const $=s=>document.querySelector(s);
 function render(){
   const v=$('#view');
-  v.innerHTML = tab==='today'?viewToday():tab==='foods'?viewFoods():tab==='body'?viewBody():viewSetup();
+  v.innerHTML = tab==='today'?viewToday():tab==='foods'?viewFoods():viewSetup();
   document.querySelectorAll('nav button').forEach(b=>b.classList.toggle('on',b.dataset.tab===tab));
   $('#sheet').innerHTML = sheet?sheetHTML():'';
-}
-
-/* Updates the scanner status line in place. A full render() would rebuild the
-   sheet and destroy the <video> the scanner library injected into #reader. */
-function setStatus(t){
-  sh.status=t;
-  const el=document.querySelector('#scanstatus');
-  if(el)el.textContent=t;
 }
 
 function barHTML(val,tgt,over){
@@ -333,7 +364,7 @@ function mealHTML(meal){
     ${items.map(e=>`<div class="item">
       <div style="min-width:0;padding-right:10px">
         <div style="font-size:14px">${esc(e.name)}</div>
-        <div class="tiny muted">${e.qty===1?'':e.qty+' \u00d7 '}${esc(e.serving||'1 serving')} &middot; P ${r0(e.p*e.qty)} C ${r0(e.c*e.qty)} F ${r0(e.f*e.qty)}</div>
+        <div class="tiny muted">${esc(scaleServing(e.serving||'1 serving',e.qty))} &middot; P ${r0(e.p*e.qty)} C ${r0(e.c*e.qty)} F ${r0(e.f*e.qty)}</div>
       </div>
       <div style="display:flex;align-items:center;gap:10px">
         <span class="mono" style="font-size:14px;font-weight:600">${r0(e.cal*e.qty)}</span>
@@ -362,62 +393,6 @@ function viewFoods(){
         <div class="tiny muted">${esc(f.serving)} &middot; ${f.cal} cal &middot; P ${f.p} C ${f.c} F ${f.f}${f.barcode?' &middot; scanned':''}</div></div>
       <button class="x" data-act="delfood" data-id="${f.id}">&times;</button>
     </div></div>`).join('')}
-  `;
-}
-
-/* -------------------------------- body -------------------------------- */
-function viewBody(){
-  const b=S.body[date]||{};
-  const keys=Object.keys(S.body).sort().reverse();
-  const avg=(n,field)=>{
-    const t=todayStr();const vals=[];
-    for(let i=0;i<n;i++){const d=S.body[shift(t,-i)];if(d&&d[field])vals.push(d[field]);}
-    return vals.length?vals.reduce((a,c)=>a+c,0)/vals.length:null;
-  };
-  const w7=avg(7,'lb'), w7prev=(()=>{const t=todayStr();const vals=[];
-    for(let i=7;i<14;i++){const d=S.body[shift(t,-i)];if(d&&d.lb)vals.push(d.lb);}
-    return vals.length?vals.reduce((a,c)=>a+c,0)/vals.length:null;})();
-  const waist=avg(7,'waist');
-  const ratio=waist&&nm(S.settings.heightIn)?waist/nm(S.settings.heightIn):null;
-  const trend=(w7!==null&&w7prev!==null)?w7-w7prev:null;
-
-  return `
-  <div class="card">
-    <div style="font-weight:700;font-size:14px;margin-bottom:12px">Measurements for ${pretty(date)}</div>
-    <div class="grid2">
-      <div><div class="lab" style="margin-bottom:4px">Weight (lb)</div>
-        <input id="bw" inputmode="decimal" value="${b.lb??''}" placeholder="190"></div>
-      <div><div class="lab" style="margin-bottom:4px">Waist (in)</div>
-        <input id="bwa" inputmode="decimal" value="${b.waist??''}" placeholder="36"></div>
-    </div>
-    <button class="btn" style="margin-top:12px" data-act="savebody">Save measurements</button>
-    <div class="tiny muted" style="margin-top:8px">Measure the waist first thing in the morning, after the bathroom, before eating, standing relaxed. Same conditions every time matters more than perfect technique.</div>
-  </div>
-
-  <div class="card">
-    <div class="lab" style="margin-bottom:10px">7-day averages</div>
-    <div class="grid3">
-      <div><div class="lab">Weight</div>
-        <div class="mono" style="font-size:19px;font-weight:700">${w7!==null?w7.toFixed(1):'&mdash;'}</div></div>
-      <div><div class="lab">vs prior week</div>
-        <div class="mono" style="font-size:19px;font-weight:700;color:${trend===null?'var(--ink)':trend<0?'var(--moss)':'var(--clay)'}">
-          ${trend===null?'&mdash;':(trend>0?'+':'')+trend.toFixed(1)}</div></div>
-      <div><div class="lab">Waist</div>
-        <div class="mono" style="font-size:19px;font-weight:700">${waist!==null?waist.toFixed(1):'&mdash;'}</div></div>
-    </div>
-    ${ratio?`<div class="note" style="margin-top:14px">
-      Waist-to-height ratio <b>${ratio.toFixed(3)}</b>.
-      ${ratio<0.5?'Under 0.5, the range associated with lower cardiometabolic risk.':
-        ratio<0.6?'Between 0.5 and 0.6. The common guideline is to keep your waist under half your height.':
-        'Above 0.6. Worth raising with your doctor alongside bloodwork.'}
-    </div>`:`<div class="tiny muted" style="margin-top:12px">Log a waist measurement and your height under Setup to see the ratio.</div>`}
-    <div class="tiny muted" style="margin-top:10px">Weekly averages smooth out water weight. A single morning reading tells you almost nothing.</div>
-  </div>
-
-  ${keys.length?`<div class="card"><div class="lab" style="margin-bottom:8px">History</div>
-    ${keys.slice(0,20).map(k=>`<div class="item"><span class="small">${pretty(k)}</span>
-      <span class="mono small">${S.body[k].lb?S.body[k].lb+' lb':''}${S.body[k].lb&&S.body[k].waist?' &middot; ':''}${S.body[k].waist?S.body[k].waist+' in':''}</span></div>`).join('')}
-  </div>`:''}
   `;
 }
 
@@ -475,6 +450,14 @@ function viewSetup(){
   </div>
 
   <div class="card">
+    <div style="font-weight:700;font-size:14px;margin-bottom:8px">Food search key</div>
+    <div class="small muted" style="margin-bottom:10px">Search pulls generic foods from USDA FoodData Central. It works without a key, but the shared one allows only about 50 lookups a day. A free personal key raises that to 1,000 an hour and arrives by email in under a minute.</div>
+    <input id="s_fdc" value="${esc(st.fdcKey||'')}" placeholder="Paste your key (optional)" autocapitalize="off" autocorrect="off" spellcheck="false">
+    <button class="btn ghost sm" style="margin-top:10px" data-act="savekey">Save key</button>
+    <div class="tiny muted" style="margin-top:10px">Get one at <a href="https://fdc.nal.usda.gov/api-key-signup" target="_blank" rel="noopener">fdc.nal.usda.gov/api-key-signup</a>. It stays on this phone. Don't commit it to the repo, USDA deactivates keys it finds in public code.</div>
+  </div>
+
+  <div class="card">
     <div style="font-weight:700;font-size:14px;margin-bottom:8px">Backup</div>
     <div class="small muted" style="margin-bottom:10px">Your data lives only in this browser. Export regularly, especially before clearing site data or changing phones.</div>
     <div style="display:flex;gap:8px">
@@ -488,7 +471,8 @@ function viewSetup(){
 }
 
 /* ============================== sheets ============================== */
-let sh={mode:'search',q:'',sel:null,qty:'1',form:{},keep:true,meal:'Snacks',status:'',scanning:false};
+let sh={mode:'saved',q:'',sel:null,qty:'1',form:{},keep:true,meal:'Snacks',status:'',scanning:false,
+  fq:'',results:[],open:null,portions:null};
 
 function sheetHTML(){
   if(sheet==='ex') return exSheet();
@@ -506,28 +490,52 @@ function addSheet(){
       <button class="x" data-act="close" style="color:var(--muted);font-size:22px">&times;</button>
     </div>
     <div class="seg">
-      <button class="${sh.mode==='search'?'on':''}" data-act="mode" data-m="search">Saved</button>
+      <button class="${sh.mode==='saved'?'on':''}" data-act="mode" data-m="saved">Saved</button>
+      <button class="${sh.mode==='usda'?'on':''}" data-act="mode" data-m="usda">Search</button>
       <button class="${sh.mode==='scan'?'on':''}" data-act="mode" data-m="scan">Scan</button>
       <button class="${sh.mode==='new'?'on':''}" data-act="mode" data-m="new">New</button>
     </div>
 
-    ${sh.mode==='search'?`
+    ${sh.mode==='saved'?`
       <input id="sq" placeholder="Search saved foods" value="${esc(sh.q)}" style="margin-bottom:10px">
       ${list.length?'':`<div class="card small muted">Nothing here yet. Scan a barcode or add it under New.</div>`}
       ${list.map(x=>`<div class="food ${sh.sel===x.id?'sel':''}" data-act="pick" data-id="${x.id}">
         <div class="row"><div><div style="font-size:14px;font-weight:600">${esc(x.name)}</div>
           <div class="tiny muted">${esc(x.serving)} &middot; P ${x.p} C ${x.c} F ${x.f}</div></div>
           <div class="mono" style="font-weight:600">${x.cal}</div></div>
-        ${sh.sel===x.id?`<div style="display:flex;gap:8px;align-items:center;margin-top:10px" data-stop>
-          <input id="qty" inputmode="decimal" value="${esc(sh.qty)}" style="width:70px">
-          <span class="small muted" style="flex:1">\u00d7 ${esc(x.serving)}</span>
-          <button class="btn sm" data-act="addsel" data-id="${x.id}">Add</button></div>`:''}
+        ${sh.sel===x.id?`<div style="margin-top:12px;padding-top:12px;border-top:1px solid var(--line)" data-stop data-keepopen>
+          <div class="lab" style="margin-bottom:5px">Servings</div>
+          <div style="display:flex;gap:8px;align-items:center">
+            <button class="step" data-act="qstep" data-n="-1">&minus;</button>
+            <input id="qty" inputmode="decimal" value="${esc(sh.qty)}" style="width:64px;text-align:center">
+            <button class="step" data-act="qstep" data-n="1">+</button>
+            <span class="small" id="qtyserv" style="flex:1;text-align:right">${esc(scaleServing(x.serving,sh.qty))}</span>
+          </div>
+          <div class="mono small" id="qtymac" style="margin-top:10px;color:var(--moss)">${qtyMacroText(x,sh.qty)}</div>
+          <button class="btn" style="margin-top:10px" data-act="addsel" data-id="${x.id}">Add to ${sh.meal.toLowerCase()}</button>
+        </div>`:''}
       </div>`).join('')}
+    `:''}
+
+    ${sh.mode==='usda'?`
+      <div style="display:flex;gap:8px">
+        <input id="fdq" placeholder="apple, chicken breast, pistachios" value="${esc(sh.fq)}">
+        <button class="btn sm" data-act="fdcgo">Search</button>
+      </div>
+      ${sh.status?`<div class="small" style="margin-top:10px;color:var(--moss)">${esc(sh.status)}</div>`:''}
+      <div style="margin-top:10px">
+      ${(sh.results||[]).map(x=>`<div class="food ${sh.open===x.id?'sel':''}" data-act="fdcpick" data-id="${x.id}">
+        <div style="font-size:14px;font-weight:600">${esc(x.name)}</div>
+        <div class="tiny muted">${r0(x.per100.cal)} cal &middot; P ${r1(x.per100.p)} C ${r1(x.per100.c)} F ${r1(x.per100.f)} &middot; per 100 g</div>
+        ${sh.open===x.id?portionBlock(x):''}
+      </div>`).join('')}
+      </div>
+      <div class="tiny muted" style="margin-top:10px">Generic foods from USDA FoodData Central. Pick one to see real portions, then adjust servings on the next screen. Packaged products are better found with the scanner.</div>
     `:''}
 
     ${sh.mode==='scan'?`
       <div id="reader"></div>
-      <div id="scanstatus" class="small" style="margin-top:10px;min-height:20px;color:var(--moss)">${esc(sh.status)}</div>
+      <div class="small" style="margin-top:10px;min-height:20px;color:var(--moss)">${esc(sh.status)}</div>
       <div style="margin-top:8px"><div class="lab" style="margin-bottom:4px">Or type the barcode</div>
         <div style="display:flex;gap:8px"><input id="manualcode" inputmode="numeric" placeholder="0123456789012">
         <button class="btn sm" data-act="lookupmanual">Look up</button></div></div>
@@ -544,16 +552,60 @@ function addSheet(){
           <div><div class="lab" style="margin-bottom:4px">Carbs (g)</div><input id="n_c" inputmode="decimal" value="${esc(f.c??'')}"></div>
           <div><div class="lab" style="margin-bottom:4px">Fat (g)</div><input id="n_f" inputmode="decimal" value="${esc(f.f??'')}"></div>
         </div>
-        <div style="display:flex;gap:10px;align-items:center;margin-top:12px">
-          <span class="lab">Servings</span>
-          <input id="n_qty" inputmode="decimal" value="${esc(sh.qty)}" style="width:70px">
+        <div class="lab" style="margin-top:14px;margin-bottom:5px">Servings</div>
+        <div style="display:flex;gap:8px;align-items:center">
+          <button class="step" data-act="qstep" data-n="-1">&minus;</button>
+          <input id="n_qty" inputmode="decimal" value="${esc(sh.qty)}" style="width:64px;text-align:center">
+          <button class="step" data-act="qstep" data-n="1">+</button>
           <label class="small" style="flex:1;display:flex;gap:7px;align-items:center;justify-content:flex-end">
             <input type="checkbox" id="n_keep" ${sh.keep?'checked':''} style="width:auto"> Save for next time</label>
         </div>
+        <div class="mono small" id="newmac" style="margin-top:10px;color:var(--moss)">${esc(newPreviewText())}</div>
         <button class="btn" style="margin-top:12px" data-act="addnew">Add to ${sh.meal.toLowerCase()}</button>
       </div>
     `:''}
   </div></div>`;
+}
+
+function qtyMacroText(f,qty){
+  const q=nm(qty);
+  return `${r0(f.cal*q)} cal \u00b7 P ${r1(f.p*q)} \u00b7 C ${r1(f.c*q)} \u00b7 F ${r1(f.f*q)}`;
+}
+function macroLine(serving,cal,p,c,f,qty){
+  const q=nm(qty)||1, v=[nm(cal),nm(p),nm(c),nm(f)];
+  if(!v.some(n=>n))return '';
+  return `${scaleServing(serving,q)} \u00b7 ${r0(v[0]*q)} cal \u00b7 P ${r1(v[1]*q)} \u00b7 C ${r1(v[2]*q)} \u00b7 F ${r1(v[3]*q)}`;
+}
+function newPreviewText(){const f=sh.form;return macroLine(f.serving,f.cal,f.p,f.c,f.f,sh.qty);}
+function updateNewPreview(){
+  const el=document.querySelector('#newmac');if(!el)return;
+  const v=id=>{const n=document.querySelector(id);return n?n.value:'';};
+  el.textContent=macroLine(v('#n_serving'),v('#n_cal'),v('#n_p'),v('#n_c'),v('#n_f'),sh.qty);
+}
+/* Patch the two preview lines directly so typing doesn't blow away focus. */
+function updateQtyPreview(){
+  const f=S.foods.find(x=>x.id===sh.sel);if(!f)return;
+  const serv=document.querySelector('#qtyserv'), mac=document.querySelector('#qtymac');
+  if(serv)serv.textContent=scaleServing(f.serving,sh.qty);
+  if(mac)mac.textContent=qtyMacroText(f,sh.qty);
+}
+
+function portionBlock(food){
+  if(!sh.portions)return `<div class="small muted" style="margin-top:10px" data-stop data-keepopen>Loading portions\u2026</div>`;
+  return `<div style="margin-top:12px;padding-top:12px;border-top:1px solid var(--line)" data-stop data-keepopen>
+    <div class="lab" style="margin-bottom:6px">Pick a portion</div>
+    <div style="max-height:220px;overflow-y:auto;-webkit-overflow-scrolling:touch">
+      ${sh.portions.map((p,i)=>{const k=p.grams/100;return `<button class="portion" data-act="fdcuse" data-i="${i}">
+        <span style="flex:1;text-align:left">${esc(servingText(p.label,p.grams))}</span>
+        <span class="mono tiny muted">${r0(food.per100.cal*k)} cal &middot; P ${r1(food.per100.p*k)}</span>
+      </button>`;}).join('')}
+    </div>
+    <div style="display:flex;gap:8px;align-items:center;margin-top:10px">
+      <input id="fdcamt" inputmode="decimal" placeholder="6" style="width:66px">
+      <select id="fdcunit" style="width:74px"><option value="oz">oz</option><option value="g">g</option></select>
+      <button class="btn ghost sm" style="flex:1" data-act="fdccustom">Use that amount</button>
+    </div>
+  </div>`;
 }
 
 function exSheet(){
@@ -621,8 +673,7 @@ function addEntry(food,qty,meal,keep){
 
 /* ---- Open Food Facts ---- */
 async function lookup(code){
-  stopScanner();
-  setStatus('Looking up '+code+'\u2026');
+  sh.status='Looking up '+code+'\u2026';render();
   try{
     const url='https://world.openfoodfacts.org/api/v2/product/'+encodeURIComponent(code)+
       '.json?fields=product_name,brands,serving_size,nutriments';
@@ -630,7 +681,7 @@ async function lookup(code){
     const j=await r.json();
     /* A missing barcode still returns HTTP 200, so check the body. */
     if(j.status!==1||!j.product){
-      setStatus('Not in the database. Add it under New and it saves for next time.');return;
+      sh.status='Not in the database. Add it under New and it saves for next time.';render();return;
     }
     const p=j.product, n=p.nutriments||{};
     const per=k=>n[k+'_serving'];
@@ -651,8 +702,102 @@ async function lookup(code){
     const warn=hasServing?'':'These numbers are per 100 g, not per serving. Adjust before saving.';
     if(warn){const el=document.querySelector('#n_serving');if(el)el.focus();alert(warn);}
   }catch(e){
-    setStatus('Lookup failed. Check your connection, or type the numbers under New.');
+    sh.status='Lookup failed. Check your connection, or type the numbers under New.';render();
   }
+}
+
+/* ---- USDA FoodData Central ---- */
+const FDC='https://api.nal.usda.gov/fdc/v1';
+const fdcKey=()=>String(S.settings.fdcKey||'').trim()||'DEMO_KEY';
+const portionCache={};
+
+/* Search results and the detail endpoint return nutrients in different
+   shapes, so flatten both to one id-keyed map. Non-branded FDC values are
+   always per 100 g. */
+function per100(food){
+  const map={};
+  (food.foodNutrients||[]).forEach(n=>{
+    const id=n.nutrientId||(n.nutrient&&n.nutrient.id);
+    const val=n.value!=null?n.value:n.amount;
+    if(id!=null&&val!=null)map[id]=nm(val);
+  });
+  const g=k=>map[k]!=null?map[k]:null;
+  const p=g(1003)||0,f=g(1004)||0,c=g(1005)||0;
+  /* 1008 is kcal; Foundation foods sometimes only carry Atwater or kJ. */
+  let cal=g(1008);
+  if(cal==null)cal=g(2047);
+  if(cal==null)cal=g(2048);
+  if(cal==null&&g(1062)!=null)cal=g(1062)/4.184;
+  if(cal==null)cal=p*4+c*4+f*9;
+  return {cal,p,c,f};
+}
+
+const servingText=(label,grams)=>/\d\s*g$/i.test(label)?label:
+  `${label} (${fmtNum(grams>=10?Math.round(grams):Math.round(grams*10)/10)} g)`;
+
+/* FNDDS puts the readable text in portionDescription; SR Legacy puts it in
+   modifier with an "undetermined" measure unit. */
+function portionLabel(p){
+  const desc=String(p.portionDescription||'').trim();
+  if(desc&&!/^quantity not specified$/i.test(desc))return desc;
+  const amt=nm(p.amount)||1;
+  const unit=p.measureUnit&&p.measureUnit.name&&p.measureUnit.name!=='undetermined'?p.measureUnit.name:'';
+  const mod=String(p.modifier||'').trim();
+  const txt=[fmtNum(amt),unit,/^\d+$/.test(mod)?'':mod].filter(Boolean).join(' ').trim();
+  return /[a-z]/i.test(txt)?txt:'';
+}
+
+async function fdcSearch(q){
+  if(!q.trim())return;
+  sh.status='Searching\u2026';sh.results=[];sh.open=null;sh.portions=null;render();
+  try{
+    const url=FDC+'/foods/search?api_key='+encodeURIComponent(fdcKey())
+      +'&query='+encodeURIComponent(q)+'&pageSize=25'
+      +'&dataType='+encodeURIComponent('Foundation,SR Legacy,Survey (FNDDS)');
+    const r=await fetch(url);
+    if(r.status===429){sh.status='USDA rate limit reached. Add your own free key under Setup to raise it.';render();return;}
+    if(r.status===403){sh.status='USDA rejected that key. Check it under Setup.';render();return;}
+    if(!r.ok){sh.status='USDA search failed ('+r.status+'). Try again shortly.';render();return;}
+    const j=await r.json();
+    sh.results=(j.foods||[]).map(x=>({id:String(x.fdcId),name:String(x.description||'').trim(),
+      per100:per100(x)})).filter(x=>x.name&&x.per100.cal>0);
+    sh.status=sh.results.length?'':'Nothing matched. Try one or two plain words, like "pistachio" or "apple raw".';
+    render();
+  }catch(e){
+    sh.status='Could not reach USDA. Check your connection, or type it under New.';render();
+  }
+}
+
+async function fdcOpen(id){
+  if(sh.open===id){sh.open=null;sh.portions=null;render();return;}
+  sh.open=id;sh.portions=portionCache[id]||null;sh.status='';render();
+  if(sh.portions)return;
+  const base=[{label:'1 oz',grams:28.35},{label:'100 g',grams:100}];
+  try{
+    const r=await fetch(FDC+'/food/'+encodeURIComponent(id)+'?api_key='+encodeURIComponent(fdcKey()));
+    const j=r.ok?await r.json():{};
+    const list=[],seen={};
+    (j.foodPortions||[]).forEach(p=>{
+      const gw=nm(p.gramWeight), label=portionLabel(p);
+      if(!gw||!label||seen[label.toLowerCase()])return;
+      seen[label.toLowerCase()]=1;list.push({label,grams:gw});
+    });
+    const full=list.concat(base);
+    portionCache[id]=full;
+    if(sh.open===id){sh.portions=full;render();}
+  }catch(e){
+    if(sh.open===id){sh.portions=base;render();}
+  }
+}
+
+/* Hand the chosen portion to the New form, where the name stays editable and
+   the servings stepper already does live math. */
+function useFdc(food,label,grams){
+  const k=grams/100;
+  sh.form={name:food.name,serving:servingText(label,grams),
+    cal:r0(food.per100.cal*k),p:r1(food.per100.p*k),
+    c:r1(food.per100.c*k),f:r1(food.per100.f*k)};
+  sh.qty='1';sh.keep=true;sh.mode='new';sh.status='';render();
 }
 
 /* ---- scanner ---- */
@@ -663,11 +808,9 @@ function loadScript(src){return new Promise((res,rej)=>{
 async function startScanner(){
   if(sh.scanning)return;
   sh.scanning=true;
-  setStatus('Starting camera\u2026');
+  sh.status='Starting camera\u2026';render();
   try{
     if(!window.Html5Qrcode) await loadScript('https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js');
-    /* The sheet may have closed while the library was downloading. */
-    if(!document.querySelector('#reader')){sh.scanning=false;return;}
     const F=window.Html5QrcodeSupportedFormats;
     scanner=new window.Html5Qrcode('reader',{
       formatsToSupport:[F.EAN_13,F.EAN_8,F.UPC_A,F.UPC_E,F.CODE_128],
@@ -677,10 +820,10 @@ async function startScanner(){
     await scanner.start({facingMode:'environment'},{fps:10,qrbox:{width:260,height:160}},
       code=>{if(!sh.scanning)return;sh.scanning=false;lookup(code);},
       ()=>{});
-    setStatus('Point at the barcode.');
+    sh.status='Point at the barcode.';render();
   }catch(e){
     sh.scanning=false;
-    setStatus('Camera unavailable. Type the barcode below instead.');
+    sh.status='Camera unavailable. Type the barcode below instead.';render();
   }
 }
 function stopScanner(){
@@ -715,19 +858,31 @@ document.addEventListener('click',e=>{
   if(a==='del'){setLog(date,logOf(date).filter(x=>x.id!==el.dataset.id));render();return;}
   if(a==='delfood'){S.foods=S.foods.filter(x=>x.id!==el.dataset.id);save();render();return;}
 
-  if(a==='add'){sheet='add';sh={...sh,mode:'search',q:'',sel:null,qty:'1',form:{},keep:true,
-    meal:el.dataset.meal,status:''};render();return;}
+  if(a==='add'){sheet='add';sh={...sh,mode:'saved',q:'',sel:null,qty:'1',form:{},keep:true,
+    meal:el.dataset.meal,status:'',fq:'',results:[],open:null,portions:null};render();return;}
   if(a==='mode'){
     const m=el.dataset.m;
     if(sh.mode==='scan'&&m!=='scan')stopScanner();
     sh.mode=m;sh.status='';render();
     if(m==='scan')startScanner();
     return;}
-  if(a==='pick'){sh.sel=(sh.sel===el.dataset.id?null:el.dataset.id);render();return;}
+  if(a==='pick'){
+    /* Taps inside the open servings row must not fold the card shut. */
+    if(e.target.closest('[data-keepopen]'))return;
+    const id=el.dataset.id;
+    if(sh.sel===id)sh.sel=null; else {sh.sel=id;sh.qty='1';}
+    render();return;}
+  if(a==='qstep'){
+    let q=nm(sh.qty);
+    q=q?Math.round((q+(+el.dataset.n))*100)/100:1;
+    if(q<0.5)q=0.5;
+    sh.qty=String(q);
+    const box=document.querySelector('#qty')||document.querySelector('#n_qty');
+    if(box)box.value=sh.qty;
+    updateQtyPreview();updateNewPreview();return;}
   if(a==='addsel'){
     const f=S.foods.find(x=>x.id===el.dataset.id);
-    const q=document.querySelector('#qty');
-    if(f){f.last=Date.now();addEntry(f,q?q.value:'1',sh.meal,false);}
+    if(f){f.last=Date.now();addEntry(f,sh.qty,sh.meal,false);}
     return;}
   if(a==='addnew'){
     const v=id=>{const n=document.querySelector(id);return n?n.value:'';};
@@ -739,6 +894,25 @@ document.addEventListener('click',e=>{
   if(a==='lookupmanual'){
     const c=document.querySelector('#manualcode').value.trim();
     if(c)lookup(c);
+    return;}
+
+  if(a==='fdcgo'){
+    const el2=document.querySelector('#fdq');
+    if(el2)sh.fq=el2.value;
+    fdcSearch(sh.fq);return;}
+  if(a==='fdcpick'){
+    if(e.target.closest('[data-keepopen]'))return;
+    fdcOpen(el.dataset.id);return;}
+  if(a==='fdcuse'){
+    const food=sh.results.find(x=>x.id===sh.open), p=sh.portions[+el.dataset.i];
+    if(food&&p)useFdc(food,p.label,p.grams);
+    return;}
+  if(a==='fdccustom'){
+    const food=sh.results.find(x=>x.id===sh.open);
+    const amt=nm(document.querySelector('#fdcamt').value);
+    const unit=document.querySelector('#fdcunit').value;
+    if(!food||!amt)return;
+    useFdc(food,fmtNum(amt)+' '+unit,unit==='oz'?amt*28.3495:amt);
     return;}
 
   if(a==='exopen'){sheet='ex';render();return;}
@@ -756,13 +930,6 @@ document.addEventListener('click',e=>{
   if(a==='delact'){
     const x=exOf(date);
     S.ex[date]={...x,items:x.items.filter(i=>i.id!==el.dataset.id)};save();render();return;}
-
-  if(a==='savebody'){
-    const lb=nm(document.querySelector('#bw').value), wa=nm(document.querySelector('#bwa').value);
-    const rec={};if(lb)rec.lb=lb;if(wa)rec.waist=wa;
-    if(Object.keys(rec).length){S.body[date]=rec;if(lb)S.settings.lb=lb;}
-    else delete S.body[date];
-    save();render();return;}
 
   if(a==='savesettings'){
     const v=id=>nm(document.querySelector(id).value);
@@ -792,6 +959,10 @@ document.addEventListener('click',e=>{
   if(a==='usecalc'){
     const [cal,p,c,f]=el.dataset.v.split(',').map(Number);
     Object.assign(S.settings,{cal,protein:p,carbs:c,fat:f});save();render();return;}
+
+  if(a==='savekey'){
+    S.settings.fdcKey=document.querySelector('#s_fdc').value.trim();
+    save();render();return;}
 
   if(a==='io'){sheet='io';render();return;}
   if(a==='doimport'){
@@ -832,6 +1003,10 @@ document.addEventListener('change',e=>{
   }
 });
 
+document.addEventListener('keydown',e=>{
+  if(e.target.id==='fdq'&&e.key==='Enter'){e.preventDefault();sh.fq=e.target.value;fdcSearch(sh.fq);}
+});
+
 /* live-typing inputs update state without a full re-render */
 document.addEventListener('input',e=>{
   if(e.target.id==='fq'){foodQuery=e.target.value;
@@ -840,8 +1015,10 @@ document.addEventListener('input',e=>{
   if(e.target.id==='sq'){sh.q=e.target.value;
     render();const el=document.querySelector('#sq');
     if(el){el.focus();el.setSelectionRange(el.value.length,el.value.length);}}
-  if(e.target.id==='qty')sh.qty=e.target.value;
+  if(e.target.id==='fdq')sh.fq=e.target.value;
+  if(e.target.id==='qty'){sh.qty=e.target.value;updateQtyPreview();}
   if(e.target.id==='n_qty')sh.qty=e.target.value;
+  if(/^n_/.test(e.target.id||''))updateNewPreview();
 });
 
 /* ============================== boot ============================== */
