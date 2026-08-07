@@ -13,13 +13,16 @@
 <link rel="icon" href="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAALQAAAC0CAIAAACyr5FlAAACsUlEQVR4nO3dMW7bMABA0bjIETIERW6Xc3TqOXq9nqODl6DoL2xZIi3wvTkRFeeL0GCSl7f3jxf4l2+zb4DnJQ6SOEjiIImDJA6SOEjiIImDJA6SOEjiIImDJA6SOEjiIImDJA6SOEjiIImDJA6SOEjiIImDJA6SOEjiIImDJA6SOEjiIImDJA6SOEjiIImDJA6SOEivs2/g5fvPzxt/8vePX4feCX+5TNyk9vYsvpLIMHPi2JbFVxIZYMI7x+Nl7HUR/s8LKWl0HDs+8SaPo5k5SEPj2P1ZN3kcysxBEgdJHCRxkMRBEgdJHCRxkMRBEgdJHCRxkMRBEgdJHCRxkMRBEgdJHCRxkOavlZ3lri8nr7nAbsU4Nnxn/forqyWyVhwPLmVYLZGF3jn2WuSyzmKZheLgXqvEse/jvsjksUocbLBEHEc86CtMHkvEwTbiIImDJA6SOEjiIImDJA6SOEjiIImDJA6SOEjiIImDJA6SOEjiIImDJA6SOEhrLYd8Emc5Z1kcQ927oGHu6lxxDPLIOpdZiXjnGOGk5yyLgySOw533nGVxkMRxrFOfsywOkjhI4iCJgyQOkjhI4iCJgyQOkjhI4iCJgyQOkjhI4iCJgyQOkjhI4iCJgyQOkjhI4iCJgyQOkjhI4iCJgyQOkjhI4iCJgyQO0tA4dt8s8cYLHrFJ46yhR244aeYgjY5jx/DvutS+D9ysoQfvU3vWmWPipuCzhl5iB+PH/8htV9jlw5019JQiL2/vH+NHvdq2a+LjH9Pm3RpnDT1rrpoZx9Ws8yXu+j/NGnrukRrz4+BpnfWFlAHEQRIHSRwkcZDEQRIHSRwkcZDEQRIHSRwkcZDEQRIHSRwkcZDEQRIHSRwkcZDEQRIHSRwkcZDEQRIHSRwkcZDEQRIHSRwkcZDEQfoDDn1wIXmWQewAAAAASUVORK5CYII=">
 <style>
   :root{
-    --paper:#EEF1F0; --card:#FFF; --ink:#14181C; --muted:#6B7A78;
-    --line:#D9DEDC; --moss:#1F6F5C; --moss-soft:#E3EFEB; --clay:#C4622D; --clay-soft:#F7E7DC;
+    /* app chrome sits on navy; content surfaces stay light */
+    --app:#232F72; --navy:#232F72; --gold:#FFC900;
+    --on-dark:#FFFFFF; --on-dark-dim:rgba(255,255,255,.58); --on-dark-faint:rgba(255,255,255,.22);
+    --paper:#EDEFF8; --card:#FFF; --ink:#232F72; --muted:#5F6899;
+    --line:#DEE1EF; --moss:#1F6F5C; --moss-soft:#E3EFEB; --clay:#C4622D; --clay-soft:#F7E7DC;
   }
   *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
   html,body{margin:0;padding:0}
   body{
-    background:var(--paper);color:var(--ink);
+    background:var(--app);color:var(--on-dark);
     font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
     font-size:16px;line-height:1.45;
     padding:env(safe-area-inset-top) 0 env(safe-area-inset-bottom);
@@ -27,8 +30,22 @@
   }
   .mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-variant-numeric:tabular-nums}
   .wrap{max-width:640px;margin:0 auto;padding:14px 14px 90px}
+  .splash{position:fixed;inset:0;z-index:60;background:var(--navy);color:var(--gold);
+      display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;
+      padding:calc(34px + env(safe-area-inset-top)) 26px calc(30px + env(safe-area-inset-bottom));
+      animation:fadein .4s ease both;cursor:pointer}
+  .splash.out{opacity:0;transition:opacity .28s ease;pointer-events:none}
+  @keyframes fadein{from{opacity:0}to{opacity:1}}
+  .splash-mark{font-size:11px;letter-spacing:.24em;text-transform:uppercase;font-weight:700;
+      opacity:.55;margin-bottom:30px}
+  .verse{font-family:Georgia,"Iowan Old Style","Times New Roman",serif;line-height:1.42;
+      max-width:520px;letter-spacing:-.005em}
+  .ref{margin-top:24px;font-size:11px;letter-spacing:.18em;text-transform:uppercase;
+      font-weight:700;opacity:.7}
+  .tap{position:absolute;left:0;right:0;bottom:calc(24px + env(safe-area-inset-bottom));
+      font-size:10px;letter-spacing:.2em;text-transform:uppercase;opacity:.4}
   .lab{font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:var(--muted);font-weight:600}
-  .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:16px 18px;margin-bottom:10px}
+  .card{background:var(--card);color:var(--ink);border:1px solid var(--line);border-radius:14px;padding:16px 18px;margin-bottom:10px}
   .row{display:flex;align-items:center;justify-content:space-between}
   .muted{color:var(--muted)}
   .small{font-size:12px}
@@ -36,14 +53,14 @@
   .hide{display:none !important}
 
   header{display:flex;align-items:center;justify-content:space-between;margin-bottom:12px}
-  .brand{font-weight:700;font-size:15px;letter-spacing:-.01em}
+  .brand{font-weight:700;font-size:15px;letter-spacing:-.01em;color:var(--on-dark)}
 
-  nav{position:fixed;left:0;right:0;bottom:0;background:rgba(238,241,240,.94);
-      backdrop-filter:blur(12px);border-top:1px solid var(--line);
+  nav{position:fixed;left:0;right:0;bottom:0;background:rgba(35,47,114,.93);
+      backdrop-filter:blur(12px);border-top:1px solid rgba(255,255,255,.15);
       padding:8px 10px calc(8px + env(safe-area-inset-bottom));display:flex;gap:4px;z-index:20}
   nav button{flex:1;border:0;background:none;padding:8px 0;border-radius:10px;
-      font-size:12px;font-weight:600;color:var(--muted);cursor:pointer;font-family:inherit}
-  nav button.on{background:var(--ink);color:#fff}
+      font-size:12px;font-weight:600;color:var(--on-dark-dim);cursor:pointer;font-family:inherit}
+  nav button.on{background:var(--moss);color:#fff;font-weight:700}
 
   input,select,textarea{font-family:inherit;font-size:16px;color:var(--ink);background:var(--card);
       border:1px solid var(--line);border-radius:8px;padding:9px 11px;outline:none;width:100%}
@@ -54,8 +71,8 @@
   .btn.sm{padding:7px 13px;font-size:13px;width:auto}
   .btn:disabled{opacity:.4}
 
-  .bar{height:7px;background:var(--line);border-radius:999px;overflow:hidden}
-  .bar>i{display:block;height:100%;border-radius:999px;background:var(--moss);transition:width .3s}
+  .bar{height:7px;background:var(--navy);border-radius:999px;overflow:hidden}
+  .bar>i{display:block;height:100%;border-radius:999px;background:var(--gold);transition:width .3s}
   .bar>i.over{background:var(--clay)}
 
   .hero{font-size:52px;font-weight:700;line-height:1;letter-spacing:-.03em}
@@ -74,19 +91,19 @@
 
   .dots{display:flex;gap:5px}
   .dot{width:20px;height:20px;border-radius:999px;border:1px solid var(--line)}
-  .dot.hit{background:var(--moss);border-color:var(--moss)}
+  .dot.hit{background:var(--gold);border-color:var(--gold)}
   .dot.miss{background:var(--clay-soft);border-color:var(--clay)}
 
-  .sheet-bg{position:fixed;inset:0;background:rgba(20,24,28,.45);z-index:30;display:flex;align-items:flex-end;justify-content:center}
-  .sheet{width:100%;max-width:640px;background:var(--paper);border-radius:18px 18px 0 0;
+  .sheet-bg{position:fixed;inset:0;background:rgba(14,19,48,.55);z-index:30;display:flex;align-items:flex-end;justify-content:center}
+  .sheet{width:100%;max-width:640px;background:var(--paper);color:var(--ink);border-radius:18px 18px 0 0;
       max-height:90vh;overflow-y:auto;padding:16px 14px calc(24px + env(safe-area-inset-bottom))}
   .seg{display:flex;gap:5px;margin-bottom:14px}
   .seg button{flex:1;padding:9px 0;border-radius:8px;border:1px solid var(--line);background:none;
       color:var(--muted);font-weight:600;font-size:12px;cursor:pointer;font-family:inherit}
-  .seg button.on{background:var(--ink);color:#fff;border-color:var(--ink)}
+  .seg button.on{background:var(--moss);color:#fff;border-color:var(--moss)}
 
   #reader{width:100%;border-radius:12px;overflow:hidden;background:#000;min-height:240px}
-  .food{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:6px}
+  .food{background:var(--card);color:var(--ink);border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:6px}
   .food.sel{border-color:var(--moss)}
   .portion{display:flex;align-items:center;gap:10px;width:100%;text-align:left;background:var(--card);
       border:1px solid var(--line);border-radius:9px;padding:10px 12px;margin-bottom:6px;
@@ -113,6 +130,7 @@
 </nav>
 
 <div id="sheet"></div>
+<div id="splash"></div>
 
 <script>
 /* ============================== storage ============================== */
@@ -152,9 +170,98 @@ function save(){
   },180);
 }
 
+/* World English Bible (public domain). 42 passages on the body,
+   discipline, appetite, and endurance. */
+const VERSES=[
+ {t:"Or don't you know that your body is a temple of the Holy Spirit who is in you, whom you have from God? You are not your own, for you were bought with a price. Therefore glorify God in your body and in your spirit, which are God's.",
+  r:"1 Corinthians 6:19-20"},
+ {t:"Don't you know that you are a temple of God, and that God's Spirit lives in you? If anyone destroys God's temple, God will destroy him; for God's temple is holy, which you are.",
+  r:"1 Corinthians 3:16-17"},
+ {t:"Therefore I urge you, brothers, by the mercies of God, to present your bodies a living sacrifice, holy, acceptable to God, which is your spiritual service.",
+  r:"Romans 12:1"},
+ {t:"Whether therefore you eat, or drink, or whatever you do, do all to the glory of God.",
+  r:"1 Corinthians 10:31"},
+ {t:"May the God of peace himself sanctify you completely. May your whole spirit, soul, and body be preserved blameless at the coming of our Lord Jesus Christ.",
+  r:"1 Thessalonians 5:23"},
+ {t:"For you formed my inmost being. You knit me together in my mother's womb. I will give thanks to you, for I am fearfully and wonderfully made. Your works are wonderful. My soul knows that very well.",
+  r:"Psalm 139:13-14"},
+ {t:"Your hands have made me and formed me. Give me understanding, that I may learn your commandments.",
+  r:"Psalm 119:73"},
+ {t:"Don't you know that those who run in a race all run, but one receives the prize? Run like that, that you may win. Every man who strives in the games exercises self-control in all things. Now they do it to receive a corruptible crown, but we an incorruptible. I therefore run like that, not aimlessly. I fight like that, not beating the air, but I beat my body and bring it into submission, lest by any means, after I have preached to others, I myself should be rejected.",
+  r:"1 Corinthians 9:24-27"},
+ {t:"For bodily exercise has some value, but godliness has value in all things, having the promise of the life which is now, and of that which is to come.",
+  r:"1 Timothy 4:8"},
+ {t:"Therefore let us also, seeing we are surrounded by so great a cloud of witnesses, lay aside every weight and the sin which so easily entangles us, and let us run with perseverance the race that is set before us,",
+  r:"Hebrews 12:1"},
+ {t:"I press on toward the goal for the prize of the high calling of God in Christ Jesus.",
+  r:"Philippians 3:14"},
+ {t:"Let us not be weary in doing good, for we will reap in due season, if we don't give up.",
+  r:"Galatians 6:9"},
+ {t:"For God didn't give us a spirit of fear, but of power, love, and self-control.",
+  r:"2 Timothy 1:7"},
+ {t:"And whatever you do, work heartily, as for the Lord, and not for men,",
+  r:"Colossians 3:23"},
+ {t:"Therefore, my beloved brothers, be steadfast, immovable, always abounding in the Lord's work, because you know that your labor is not in vain in the Lord.",
+  r:"1 Corinthians 15:58"},
+ {t:"Like a city that is broken down and without walls is a man whose spirit is without restraint.",
+  r:"Proverbs 25:28"},
+ {t:"But the fruit of the Spirit is love, joy, peace, patience, kindness, goodness, faith, gentleness, and self-control. Against such things there is no law.",
+  r:"Galatians 5:22-23"},
+ {t:"Don't be among ones drinking too much wine, or those who gorge themselves on meat: for the drunkard and the glutton shall become poor; and drowsiness clothes them in rags.",
+  r:"Proverbs 23:20-21"},
+ {t:"Have you found honey? Eat as much as is sufficient for you, lest you eat too much, and vomit it.",
+  r:"Proverbs 25:16"},
+ {t:"It is not good to eat much honey; nor is it honorable to seek one's own honor.",
+  r:"Proverbs 25:27"},
+ {t:"\"All things are lawful for me,\" but not all things are expedient. \"All things are lawful for me,\" but I will not be brought under the power of anything.",
+  r:"1 Corinthians 6:12"},
+ {t:"whose end is destruction, whose god is the belly, and whose glory is in their shame, who think about earthly things.",
+  r:"Philippians 3:19"},
+ {t:"For the grace of God has appeared, bringing salvation to all men, instructing us to the intent that, denying ungodliness and worldly lusts, we would live soberly, righteously, and godly in this present age;",
+  r:"Titus 2:11-12"},
+ {t:"Be sober and self-controlled. Be watchful. Your adversary, the devil, walks around like a roaring lion, seeking whom he may devour.",
+  r:"1 Peter 5:8"},
+ {t:"But Daniel purposed in his heart that he would not defile himself with the king's dainties, nor with the wine which he drank. Therefore he requested of the prince of the eunuchs that he might not defile himself.",
+  r:"Daniel 1:8"},
+ {t:"The soul of the sluggard desires, and has nothing, but the desire of the diligent shall be fully satisfied.",
+  r:"Proverbs 13:4"},
+ {t:"The plans of the diligent surely lead to profit; and everyone who is hasty surely rushes to poverty.",
+  r:"Proverbs 21:5"},
+ {t:"Commit your deeds to Yahweh, and your plans shall succeed.",
+  r:"Proverbs 16:3"},
+ {t:"She arms her waist with strength, and makes her arms strong.",
+  r:"Proverbs 31:17"},
+ {t:"He gives power to the weak. He increases the strength of him who has no might. Even the youths faint and get weary, and the young men utterly fall; But those who wait for Yahweh will renew their strength. They will mount up with wings like eagles. They will run, and not be weary. They will walk, and not faint.",
+  r:"Isaiah 40:29-31"},
+ {t:"Don't you be afraid, for I am with you. Don't be dismayed, for I am your God. I will strengthen you. Yes, I will help you. Yes, I will uphold you with the right hand of my righteousness.",
+  r:"Isaiah 41:10"},
+ {t:"I can do all things through Christ, who strengthens me.",
+  r:"Philippians 4:13"},
+ {t:"Therefore we don't faint, but though our outward man is decaying, yet our inward man is renewed day by day.",
+  r:"2 Corinthians 4:16"},
+ {t:"My flesh and my heart fails, but God is the strength of my heart and my portion forever.",
+  r:"Psalm 73:26"},
+ {t:"Haven't I commanded you? Be strong and courageous. Don't be afraid. Don't be dismayed, for Yahweh your God is with you wherever you go.\"",
+  r:"Joshua 1:9"},
+ {t:"Not only this, but we also rejoice in our sufferings, knowing that suffering produces perseverance; and perseverance, proven character; and proven character, hope:",
+  r:"Romans 5:3-4"},
+ {t:"Blessed is the man who endures temptation, for when he has been approved, he will receive the crown of life, which the Lord promised to those who love him.",
+  r:"James 1:12"},
+ {t:"Don't be wise in your own eyes. Fear Yahweh, and depart from evil. It will be health to your body, and nourishment to your bones.",
+  r:"Proverbs 3:7-8"},
+ {t:"My son, attend to my words. Turn your ear to my sayings. Let them not depart from your eyes. Keep them in the center of your heart. For they are life to those who find them, and health to their whole body.",
+  r:"Proverbs 4:20-22"},
+ {t:"The life of the body is a heart at peace, but envy rots the bones.",
+  r:"Proverbs 14:30"},
+ {t:"A cheerful heart makes good medicine, but a crushed spirit dries up the bones.",
+  r:"Proverbs 17:22"},
+ {t:"Beloved, I pray that you may prosper in all things and be healthy, even as your soul prospers.",
+  r:"3 John 1:2"},
+];
+
 /* ============================== model ============================== */
 const DEFAULTS={
-  settings:{cal:2200,protein:170,carbs:200,fat:70,lb:190,heightIn:71,eatBack:75,lastBackup:0,fdcKey:''},
+  settings:{cal:2200,protein:170,carbs:200,fat:70,lb:190,heightIn:71,eatBack:75,lastBackup:0,fdcKey:'',lastVerse:-1},
   /* body: kept in the model so old backups restore cleanly and a future
      weight / body-fat screen has somewhere to write. No UI reads it now. */
   foods:[], logs:{}, ex:{}, body:{}
@@ -260,6 +367,49 @@ function streakInfo(){
   return {cur,best,w:win(7),m:win(30),recent};
 }
 
+/* ============================== splash ============================== */
+/* Shown on launch. iOS keeps a home screen web app alive in the background,
+   so a return after this long counts as a fresh open. */
+const SPLASH_GAP=60*60e3;
+let lastSeen=Date.now(), lastDay=todayStr();
+
+function pickVerse(){
+  const last=S.settings.lastVerse;
+  let i=Math.floor(Math.random()*VERSES.length);
+  /* never the same verse twice running */
+  if(VERSES.length>1&&i===last)i=(i+1)%VERSES.length;
+  S.settings.lastVerse=i;save();
+  return VERSES[i];
+}
+function showSplash(){
+  const v=pickVerse(), n=v.t.length;
+  const size=n<90?30:n<150?26:n<240?22:n<340?19:17;
+  document.body.style.overflow='hidden';
+  document.querySelector('#splash').innerHTML=`
+    <div class="splash" data-act="dismiss">
+      <div class="splash-mark">Deficit</div>
+      <div class="verse" style="font-size:${size}px">${esc(v.t)}</div>
+      <div class="ref">${esc(v.r)}</div>
+      <div class="tap">Tap to begin</div>
+    </div>`;
+}
+function hideSplash(){
+  const el=document.querySelector('.splash');
+  if(!el)return;
+  el.classList.add('out');
+  document.body.style.overflow='';
+  setTimeout(()=>{document.querySelector('#splash').innerHTML='';},280);
+}
+document.addEventListener('visibilitychange',()=>{
+  if(document.hidden){lastSeen=Date.now();lastDay=todayStr();return;}
+  const away=Date.now()-lastSeen;
+  /* Mid-task is not a fresh open. Re-rendering would wipe a half-typed food
+     and kill a running camera, so leave an open sheet alone entirely. */
+  if(sheet){lastSeen=Date.now();return;}
+  if(todayStr()!==lastDay){date=todayStr();render();}
+  if(away>SPLASH_GAP)showSplash();
+});
+
 /* ============================== render ============================== */
 const $=s=>document.querySelector(s);
 function render(){
@@ -281,9 +431,9 @@ function viewToday(){
 
   return `
   <div class="row" style="margin-bottom:10px">
-    <button class="x" data-act="day" data-n="-1" style="color:var(--muted);font-size:22px">&#8249;</button>
-    <div style="font-size:14px;font-weight:600">${pretty(date)}</div>
-    <button class="x" data-act="day" data-n="1" style="color:${date>=todayStr()?'var(--line)':'var(--muted)'};font-size:22px">&#8250;</button>
+    <button class="x" data-act="day" data-n="-1" style="color:var(--on-dark-dim);font-size:22px">&#8249;</button>
+    <div style="font-size:14px;font-weight:600;color:var(--on-dark)">${pretty(date)}</div>
+    <button class="x" data-act="day" data-n="1" style="color:${date>=todayStr()?'var(--on-dark-faint)':'var(--on-dark-dim)'};font-size:22px">&#8250;</button>
   </div>
 
   <div class="card">
@@ -845,6 +995,7 @@ function exportData(){
 
 /* ============================== events ============================== */
 document.addEventListener('click',e=>{
+  if(e.target.closest('.splash')){hideSplash();return;}
   const nav=e.target.closest('nav button');
   if(nav){tab=nav.dataset.tab;stopScanner();sheet=null;render();return;}
   const el=e.target.closest('[data-act]');
@@ -1034,6 +1185,7 @@ document.addEventListener('input',e=>{
     history.replaceState({},'',location.pathname);
   }
   render();
+  showSplash();
 })();
 </script>
 </body>
