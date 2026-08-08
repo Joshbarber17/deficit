@@ -18,6 +18,7 @@
     --on-dark:#FFFFFF; --on-dark-dim:rgba(255,255,255,.58); --on-dark-faint:rgba(255,255,255,.22);
     --paper:#EDEFF8; --card:#FFF; --ink:#232F72; --muted:#5F6899;
     --line:#DEE1EF; --moss:#1F6F5C; --moss-soft:#E3EFEB; --clay:#C4622D; --clay-soft:#F7E7DC;
+    --red:#FF1F1F; --red-ink:#D40D1E; --blue-soft:#A9B2E4;
   }
   *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
   html,body{margin:0;padding:0}
@@ -73,7 +74,9 @@
 
   .bar{height:7px;background:var(--navy);border-radius:999px;overflow:hidden}
   .bar>i{display:block;height:100%;border-radius:999px;background:var(--gold);transition:width .3s}
-  .bar>i.over{background:var(--clay)}
+  .bar>i.nat{background:var(--blue-soft)}
+  .bar>i.warn{background:var(--clay)}
+  .bar>i.over{background:var(--red)}
 
   .hero{font-size:52px;font-weight:700;line-height:1;letter-spacing:-.03em}
   .grid2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
@@ -92,7 +95,7 @@
   .dots{display:flex;gap:5px}
   .dot{width:20px;height:20px;border-radius:999px;border:1px solid var(--line)}
   .dot.hit{background:var(--gold);border-color:var(--gold)}
-  .dot.miss{background:var(--clay-soft);border-color:var(--clay)}
+  .dot.miss{background:var(--red);border-color:var(--red)}
 
   .sheet-bg{position:fixed;inset:0;background:rgba(14,19,48,.55);z-index:30;display:flex;align-items:flex-end;justify-content:center}
   .sheet{width:100%;max-width:640px;background:var(--paper);color:var(--ink);border-radius:18px 18px 0 0;
@@ -109,6 +112,9 @@
       border:1px solid var(--line);border-radius:9px;padding:10px 12px;margin-bottom:6px;
       font-family:inherit;font-size:14px;color:var(--ink);cursor:pointer}
   .portion:active{border-color:var(--moss);background:var(--moss-soft)}
+  .flag{display:inline-block;background:var(--clay-soft);color:var(--clay);border-radius:6px;
+      padding:1px 6px;font-size:10px;font-weight:700;white-space:nowrap;margin-left:6px}
+  .flag.hot{background:#FFE2E2;color:var(--red-ink)}
   .banner{background:var(--clay-soft);border:1px solid var(--clay);color:var(--clay);
       border-radius:10px;padding:10px 12px;font-size:13px;margin-bottom:10px}
   .note{background:var(--moss-soft);border-radius:10px;padding:12px 14px;font-size:13px;color:var(--moss)}
@@ -261,7 +267,7 @@ const VERSES=[
 
 /* ============================== model ============================== */
 const DEFAULTS={
-  settings:{cal:2200,protein:170,carbs:200,fat:70,lb:190,heightIn:71,eatBack:75,lastBackup:0,fdcKey:'',lastVerse:-1},
+  settings:{cal:2200,protein:170,carbs:200,fat:70,lb:190,heightIn:71,eatBack:75,lastBackup:0,fdcKey:'',lastVerse:-1,addSugar:36},
   /* body: kept in the model so old backups restore cleanly and a future
      weight / body-fat screen has somewhere to write. No UI reads it now. */
   foods:[], logs:{}, ex:{}, body:{}
@@ -280,6 +286,9 @@ function pretty(s){
 }
 const uid=()=>Math.random().toString(36).slice(2,10);
 const nm=v=>{const n=parseFloat(v);return isNaN(n)?0:n;};
+/* Sugar fields are nullable on purpose: a missing added-sugar value must never
+   be counted as zero, or a cookie would look as clean as an apple. */
+const nn=v=>{if(v===''||v==null)return null;const n=parseFloat(v);return isNaN(n)?null:n;};
 const r0=n=>Math.round(n);
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const r1=n=>Math.round(n*10)/10;
@@ -334,6 +343,15 @@ const burnFor=(met,mins)=>r0(Math.max(met-1,0)*(nm(S.settings.lb)*0.4536)*(nm(mi
 
 const logOf=d=>S.logs[d]||[];
 const exOf=d=>S.ex[d]||{watch:'',items:[]};
+/* Natural sugar is derived, never entered: total minus added. */
+function sugarOf(d){
+  let tot=0,add=0,missTot=0,missAdd=0;
+  logOf(d).forEach(e=>{
+    if(e.sug==null)missTot++; else tot+=e.sug*e.qty;
+    if(e.add==null)missAdd++; else add+=e.add*e.qty;
+  });
+  return {tot,add,nat:Math.max(tot-add,0),missTot,missAdd};
+}
 function totalsOf(d){
   return logOf(d).reduce((a,e)=>({cal:a.cal+e.cal*e.qty,p:a.p+e.p*e.qty,
     c:a.c+e.c*e.qty,f:a.f+e.f*e.qty}),{cal:0,p:0,c:0,f:0});
@@ -419,14 +437,36 @@ function render(){
   $('#sheet').innerHTML = sheet?sheetHTML():'';
 }
 
-function barHTML(val,tgt,over){
+/* Warn while closing on a ceiling, red once past it. Protein is a floor,
+   not a ceiling, so it never warns. */
+const WARN_CAL=200;
+function barState(val,tgt,warnAt){
+  if(tgt<=0)return '';
+  if(val>tgt)return 'over';
+  if(val>=tgt-warnAt)return 'warn';
+  return '';
+}
+/* Shown wherever a food is being considered, so added sugar is visible before
+   it is eaten rather than after. */
+function addFlag(v){
+  if(v==null||!(v>0))return '';
+  const hot=v>=nm(S.settings.addSugar)/2;
+  return `<span class="flag${hot?' hot':''}">+${r1(v)}g added</span>`;
+}
+function barHTML(val,tgt,state){
   const pct=tgt>0?Math.min(val/tgt,1)*100:0;
-  return `<div class="bar"><i class="${over?'over':''}" style="width:${pct}%"></i></div>`;
+  return `<div class="bar"><i class="${state||''}" style="width:${pct}%"></i></div>`;
 }
 
 function viewToday(){
   const t=totalsOf(date), ceil=ceilingOf(date), cred=credited(date);
   const st=S.settings, pLeft=nm(st.protein)-t.p, calLeft=ceil-t.cal, over=calLeft<0;
+  const calState=barState(t.cal,ceil,WARN_CAL), near=calState==='warn';
+  const cState=barState(t.c,st.carbs,nm(st.carbs)*0.1);
+  const fState=barState(t.f,st.fat,nm(st.fat)*0.1);
+  const sg=sugarOf(date), aState=barState(sg.add,nm(st.addSugar),nm(st.addSugar)*0.15);
+  /* one shared scale so the two sugar bars can be compared by eye */
+  const sugScale=Math.max(nm(st.addSugar),sg.tot,1);
   const s=streakInfo(), x=exOf(date);
 
   return `
@@ -447,15 +487,15 @@ function viewToday(){
         <div>${r0(t.p)} eaten</div><div>${r0(st.protein)} target</div>
       </div>
     </div>
-    <div style="margin-top:12px">${barHTML(t.p,st.protein,false)}</div>
+    <div style="margin-top:12px">${barHTML(t.p,st.protein,'')}</div>
 
     <div style="margin-top:18px;padding-top:14px;border-top:1px solid var(--line)">
       <div class="row" style="margin-bottom:7px">
-        <div class="lab">${over?'Over ceiling':'Calories left'}</div>
-        <div class="mono" style="font-size:17px;font-weight:700;color:${over?'var(--clay)':'var(--ink)'}">
+        <div class="lab">${over?'Over ceiling':near?'Closing in':'Calories left'}</div>
+        <div class="mono" style="font-size:17px;font-weight:700;color:${over?'var(--red-ink)':near?'var(--clay)':'var(--ink)'}">
           ${r0(Math.abs(calLeft))}</div>
       </div>
-      ${barHTML(t.cal,ceil,over)}
+      ${barHTML(t.cal,ceil,calState)}
       <div class="row tiny muted" style="margin-top:6px">
         <span>${r0(t.cal)} of ${r0(ceil)}</span>
         <span>${cred>0?`${r0(st.cal)} base + ${cred} burn`:'rest-day base'}</span>
@@ -464,11 +504,35 @@ function viewToday(){
 
     <div class="grid2" style="margin-top:16px">
       <div><div class="lab" style="margin-bottom:5px">Carbs</div>
-        <div class="mono" style="font-size:15px;font-weight:600;margin-bottom:5px">${r0(t.c)}<span class="muted" style="font-weight:400"> / ${r0(st.carbs)}g</span></div>
-        ${barHTML(t.c,st.carbs,false)}</div>
+        <div class="mono" style="font-size:15px;font-weight:600;margin-bottom:5px;color:${cState==='over'?'var(--red-ink)':cState==='warn'?'var(--clay)':'var(--ink)'}">${r0(t.c)}<span class="muted" style="font-weight:400"> / ${r0(st.carbs)}g</span></div>
+        ${barHTML(t.c,st.carbs,cState)}</div>
       <div><div class="lab" style="margin-bottom:5px">Fat</div>
-        <div class="mono" style="font-size:15px;font-weight:600;margin-bottom:5px">${r0(t.f)}<span class="muted" style="font-weight:400"> / ${r0(st.fat)}g</span></div>
-        ${barHTML(t.f,st.fat,false)}</div>
+        <div class="mono" style="font-size:15px;font-weight:600;margin-bottom:5px;color:${fState==='over'?'var(--red-ink)':fState==='warn'?'var(--clay)':'var(--ink)'}">${r0(t.f)}<span class="muted" style="font-weight:400"> / ${r0(st.fat)}g</span></div>
+        ${barHTML(t.f,st.fat,fState)}</div>
+    </div>
+
+    <div style="margin-top:18px;padding-top:14px;border-top:1px solid var(--line)">
+      <div class="row" style="align-items:baseline;margin-bottom:12px">
+        <div class="lab">Total sugar</div>
+        <div class="mono" style="font-size:19px;font-weight:700">${r1(sg.tot)}<span class="muted small" style="font-weight:500">g</span></div>
+      </div>
+
+      <div class="row tiny" style="margin-bottom:5px">
+        <span class="lab">Added</span>
+        <span class="mono" style="font-weight:600;color:${aState==='over'?'var(--red-ink)':aState==='warn'?'var(--clay)':'var(--ink)'}">${r1(sg.add)} / ${r0(st.addSugar)}g</span>
+      </div>
+      ${barHTML(sg.add,sugScale,aState)}
+
+      <div class="row tiny" style="margin:12px 0 5px">
+        <span class="lab">Natural</span>
+        <span class="mono" style="font-weight:600">${r1(sg.nat)}g</span>
+      </div>
+      ${barHTML(sg.nat,sugScale,'nat')}
+
+      <div class="tiny muted" style="margin-top:8px">${
+        sg.missTot?`${sg.missTot} ${sg.missTot===1?'item has':'items have'} no sugar data, so both numbers read low. Edit the food to fill them in.`:
+        sg.missAdd?`${sg.missAdd} ${sg.missAdd===1?'item has':'items have'} no added-sugar figure, so added reads as a floor, not a total.`:
+        'Both bars share one scale, so the split is honest at a glance.'}</div>
     </div>
   </div>
 
@@ -514,7 +578,7 @@ function mealHTML(meal){
     ${items.map(e=>`<div class="item">
       <div style="min-width:0;padding-right:10px">
         <div style="font-size:14px">${esc(e.name)}</div>
-        <div class="tiny muted">${esc(scaleServing(e.serving||'1 serving',e.qty))} &middot; P ${r0(e.p*e.qty)} C ${r0(e.c*e.qty)} F ${r0(e.f*e.qty)}</div>
+        <div class="tiny muted">${esc(scaleServing(e.serving||'1 serving',e.qty))} &middot; P ${r0(e.p*e.qty)} C ${r0(e.c*e.qty)} F ${r0(e.f*e.qty)}${e.add!=null?addFlag(e.add*e.qty):(e.sug!=null?'<span class="flag">added ?</span>':'')}</div>
       </div>
       <div style="display:flex;align-items:center;gap:10px">
         <span class="mono" style="font-size:14px;font-weight:600">${r0(e.cal*e.qty)}</span>
@@ -540,7 +604,7 @@ function viewFoods(){
   ${list.map(f=>`<div class="food">
     <div class="row">
       <div><div style="font-size:14px;font-weight:600">${esc(f.name)}</div>
-        <div class="tiny muted">${esc(f.serving)} &middot; ${f.cal} cal &middot; P ${f.p} C ${f.c} F ${f.f}${f.barcode?' &middot; scanned':''}</div></div>
+        <div class="tiny muted">${esc(f.serving)} &middot; ${f.cal} cal &middot; P ${f.p} C ${f.c} F ${f.f}${f.barcode?' &middot; scanned':''}${addFlag(f.add)}</div></div>
       <button class="x" data-act="delfood" data-id="${f.id}">&times;</button>
     </div></div>`).join('')}
   `;
@@ -559,6 +623,7 @@ function viewSetup(){
       <div><div class="lab" style="margin-bottom:4px">Calorie ceiling</div><input id="s_cal" inputmode="decimal" value="${st.cal}"></div>
       <div><div class="lab" style="margin-bottom:4px">Carbs (g)</div><input id="s_carbs" inputmode="decimal" value="${st.carbs}"></div>
       <div><div class="lab" style="margin-bottom:4px">Fat (g)</div><input id="s_fat" inputmode="decimal" value="${st.fat}"></div>
+      <div><div class="lab" style="margin-bottom:4px">Added sugar cap (g)</div><input id="s_sug" inputmode="decimal" value="${st.addSugar}"></div>
       <div><div class="lab" style="margin-bottom:4px">Body weight (lb)</div><input id="s_lb" inputmode="decimal" value="${st.lb}"></div>
       <div><div class="lab" style="margin-bottom:4px">Height (in)</div><input id="s_h" inputmode="decimal" value="${st.heightIn}"></div>
       <div><div class="lab" style="margin-bottom:4px">Eat back burn (%)</div><input id="s_eat" inputmode="numeric" value="${st.eatBack}"></div>
@@ -651,7 +716,7 @@ function addSheet(){
       ${list.length?'':`<div class="card small muted">Nothing here yet. Scan a barcode or add it under New.</div>`}
       ${list.map(x=>`<div class="food ${sh.sel===x.id?'sel':''}" data-act="pick" data-id="${x.id}">
         <div class="row"><div><div style="font-size:14px;font-weight:600">${esc(x.name)}</div>
-          <div class="tiny muted">${esc(x.serving)} &middot; P ${x.p} C ${x.c} F ${x.f}</div></div>
+          <div class="tiny muted">${esc(x.serving)} &middot; P ${x.p} C ${x.c} F ${x.f}${addFlag(x.add)}</div></div>
           <div class="mono" style="font-weight:600">${x.cal}</div></div>
         ${sh.sel===x.id?`<div style="margin-top:12px;padding-top:12px;border-top:1px solid var(--line)" data-stop data-keepopen>
           <div class="lab" style="margin-bottom:5px">Servings</div>
@@ -680,7 +745,7 @@ function addSheet(){
       <div style="margin-top:10px">
       ${(sh.results||[]).map(x=>`<div class="food ${sh.open===x.id?'sel':''}" data-act="fdcpick" data-id="${x.id}">
         <div style="font-size:14px;font-weight:600">${esc(x.name)}</div>
-        <div class="tiny muted">${r0(x.per100.cal)} cal &middot; P ${r1(x.per100.p)} C ${r1(x.per100.c)} F ${r1(x.per100.f)} &middot; per 100 g</div>
+        <div class="tiny muted">${r0(x.per100.cal)} cal &middot; P ${r1(x.per100.p)} C ${r1(x.per100.c)} F ${r1(x.per100.f)} &middot; per 100 g${x.per100.add!=null?addFlag(x.per100.add):(x.branded?'<span class="flag">added ?</span>':'')}</div>
         ${sh.open===x.id?portionBlock(x):''}
       </div>`).join('')}
       </div>
@@ -705,6 +770,8 @@ function addSheet(){
           <div><div class="lab" style="margin-bottom:4px">Protein (g)</div><input id="n_p" inputmode="decimal" value="${esc(f.p??'')}"></div>
           <div><div class="lab" style="margin-bottom:4px">Carbs (g)</div><input id="n_c" inputmode="decimal" value="${esc(f.c??'')}"></div>
           <div><div class="lab" style="margin-bottom:4px">Fat (g)</div><input id="n_f" inputmode="decimal" value="${esc(f.f??'')}"></div>
+          <div><div class="lab" style="margin-bottom:4px">Total sugar (g)</div><input id="n_sug" inputmode="decimal" value="${esc(f.sug??'')}"></div>
+          <div><div class="lab" style="margin-bottom:4px">Added sugar (g)</div><input id="n_add" inputmode="decimal" value="${esc(f.add??'')}" placeholder="blank = unknown"></div>
         </div>
         <div class="lab" style="margin-top:14px;margin-bottom:5px">Servings</div>
         <div style="display:flex;gap:8px;align-items:center">
@@ -723,18 +790,21 @@ function addSheet(){
 
 function qtyMacroText(f,qty){
   const q=nm(qty);
-  return `${r0(f.cal*q)} cal \u00b7 P ${r1(f.p*q)} \u00b7 C ${r1(f.c*q)} \u00b7 F ${r1(f.f*q)}`;
+  const sug=f.sug!=null?` \u00b7 sugar ${r1(f.sug*q)}${f.add!=null?` (${r1(f.add*q)} added)`:''}`:'';
+  return `${r0(f.cal*q)} cal \u00b7 P ${r1(f.p*q)} \u00b7 C ${r1(f.c*q)} \u00b7 F ${r1(f.f*q)}${sug}`;
 }
-function macroLine(serving,cal,p,c,f,qty){
+function macroLine(serving,cal,p,c,f,qty,sug,add){
   const q=nm(qty)||1, v=[nm(cal),nm(p),nm(c),nm(f)];
   if(!v.some(n=>n))return '';
-  return `${scaleServing(serving,q)} \u00b7 ${r0(v[0]*q)} cal \u00b7 P ${r1(v[1]*q)} \u00b7 C ${r1(v[2]*q)} \u00b7 F ${r1(v[3]*q)}`;
+  const st=nn(sug), at=nn(add);
+  const tail=st!=null?` \u00b7 sugar ${r1(st*q)}${at!=null?` (${r1(at*q)} added)`:' (added unknown)'}`:'';
+  return `${scaleServing(serving,q)} \u00b7 ${r0(v[0]*q)} cal \u00b7 P ${r1(v[1]*q)} \u00b7 C ${r1(v[2]*q)} \u00b7 F ${r1(v[3]*q)}${tail}`;
 }
-function newPreviewText(){const f=sh.form;return macroLine(f.serving,f.cal,f.p,f.c,f.f,sh.qty);}
+function newPreviewText(){const f=sh.form;return macroLine(f.serving,f.cal,f.p,f.c,f.f,sh.qty,f.sug,f.add);}
 function updateNewPreview(){
   const el=document.querySelector('#newmac');if(!el)return;
   const v=id=>{const n=document.querySelector(id);return n?n.value:'';};
-  el.textContent=macroLine(v('#n_serving'),v('#n_cal'),v('#n_p'),v('#n_c'),v('#n_f'),sh.qty);
+  el.textContent=macroLine(v('#n_serving'),v('#n_cal'),v('#n_p'),v('#n_c'),v('#n_f'),sh.qty,v('#n_sug'),v('#n_add'));
 }
 /* Patch the two preview lines directly so typing doesn't blow away focus. */
 function updateQtyPreview(){
@@ -751,7 +821,7 @@ function portionBlock(food){
     <div style="max-height:220px;overflow-y:auto;-webkit-overflow-scrolling:touch">
       ${sh.portions.map((p,i)=>{const k=p.grams/100;return `<button class="portion" data-act="fdcuse" data-i="${i}">
         <span style="flex:1;text-align:left">${esc(servingText(p.label,p.grams))}</span>
-        <span class="mono tiny muted">${r0(food.per100.cal*k)} cal &middot; P ${r1(food.per100.p*k)}</span>
+        <span class="mono tiny muted">${r0(food.per100.cal*k)} cal &middot; P ${r1(food.per100.p*k)}${food.per100.add!=null?addFlag(food.per100.add*k):''}</span>
       </button>`;}).join('')}
     </div>
     <div style="display:flex;gap:8px;align-items:center;margin-top:10px">
@@ -814,12 +884,13 @@ function ioSheet(){
 function setLog(d,arr){S.logs[d]=arr;if(!arr.length)delete S.logs[d];save();}
 function addEntry(food,qty,meal,keep){
   const e={id:uid(),name:food.name,serving:food.serving||'1 serving',qty:nm(qty)||1,
-    cal:nm(food.cal),p:nm(food.p),c:nm(food.c),f:nm(food.f),meal};
+    cal:nm(food.cal),p:nm(food.p),c:nm(food.c),f:nm(food.f),
+    sug:nn(food.sug),add:nn(food.add),meal};
   setLog(date,[...logOf(date),e]);
   if(keep){
     const i=S.foods.findIndex(x=>x.name.toLowerCase()===food.name.toLowerCase());
     const rec={id:i>=0?S.foods[i].id:uid(),name:food.name,serving:e.serving,cal:e.cal,
-      p:e.p,c:e.c,f:e.f,barcode:food.barcode||null,last:Date.now()};
+      p:e.p,c:e.c,f:e.f,sug:e.sug,add:e.add,barcode:food.barcode||null,last:Date.now()};
     if(i>=0)S.foods[i]=rec;else S.foods.push(rec);
   }
   save();sheet=null;stopScanner();render();
@@ -841,6 +912,7 @@ async function lookup(code){
     const per=k=>n[k+'_serving'];
     const hundred=k=>n[k+'_100g'];
     const hasServing=per('energy-kcal')!=null||per('proteins')!=null;
+    const has=k=>(hasServing?per(k):hundred(k))!=null;
     const g=k=>hasServing?nm(per(k)):nm(hundred(k));
     const name=[p.brands?String(p.brands).split(',')[0].trim():'',p.product_name].filter(Boolean).join(' ');
     sh.form={
@@ -848,6 +920,8 @@ async function lookup(code){
       serving:hasServing?(p.serving_size||'1 serving'):'100 g',
       cal:r0(g('energy-kcal')),p:Math.round(g('proteins')*10)/10,
       c:Math.round(g('carbohydrates')*10)/10,f:Math.round(g('fat')*10)/10,
+      sug:has('sugars')?r1(g('sugars')):'',
+      add:has('added-sugars')?r1(g('added-sugars')):'',
       barcode:code
     };
     sh.mode='new';sh.status='';
@@ -877,13 +951,18 @@ function per100(food){
   });
   const g=k=>map[k]!=null?map[k]:null;
   const p=g(1003)||0,f=g(1004)||0,c=g(1005)||0;
+  /* 2000 total sugars (1063 on older records), 1235 added sugars. Added is
+     never measured, only derived from the ingredient list, so it is often
+     simply absent. */
+  let sug=g(2000); if(sug==null)sug=g(1063);
+  const add=g(1235);
   /* 1008 is kcal; Foundation foods sometimes only carry Atwater or kJ. */
   let cal=g(1008);
   if(cal==null)cal=g(2047);
   if(cal==null)cal=g(2048);
   if(cal==null&&g(1062)!=null)cal=g(1062)/4.184;
   if(cal==null)cal=p*4+c*4+f*9;
-  return {cal,p,c,f};
+  return {cal,p,c,f,sug,add};
 }
 
 const servingText=(label,grams)=>/\d\s*g$/i.test(label)?label:
@@ -901,13 +980,44 @@ function portionLabel(p){
   return /[a-z]/i.test(txt)?txt:'';
 }
 
+/* USDA's own ordering buries exact matches: searching "chiquita organic
+   banana" puts a banana bread mix on top. Re-rank locally against the query,
+   rewarding whole-phrase and whole-word hits and penalising names padded with
+   words the query never mentioned. */
+const normTxt=s=>String(s||'').toLowerCase().replace(/['\u2019]/g,'')
+  .replace(/[^a-z0-9]+/g,' ').trim();
+const sameWord=(a,b)=>a===b||a===b+'s'||b===a+'s'||a===b+'es'||b===a+'es';
+
+function scoreMatch(name,brand,qTokens,qNorm){
+  const n=normTxt(name), nTokens=n.split(' ').filter(Boolean);
+  const bTokens=normTxt(brand).split(' ').filter(Boolean);
+  let score=0, hits=0;
+  if(qNorm&&n.includes(qNorm))score+=100;              /* whole phrase, in order */
+  qTokens.forEach(t=>{
+    if(nTokens.some(w=>sameWord(w,t))){score+=15;hits++;}
+    else if(n.includes(t)){score+=6;hits++;}
+  });
+  if(hits===qTokens.length)score+=45;                  /* nothing in the query missing */
+  if(bTokens.length&&qTokens.some(t=>sameWord(bTokens[0],t)))score+=20;
+  /* every unasked-for word is noise: "banana chips" is not "banana" */
+  score-=Math.max(0,nTokens.length-qTokens.length)*2.5;
+  return score;
+}
+function rankResults(list,q){
+  const qNorm=normTxt(q), qTokens=qNorm.split(' ').filter(Boolean);
+  if(!qTokens.length)return list;
+  return list.map(x=>({x,s:scoreMatch(x.name,x.brand,qTokens,qNorm)}))
+    .sort((a,b)=>b.s-a.s).map(o=>o.x);
+}
+
 async function fdcSearch(q){
   if(!q.trim())return;
   sh.status='Searching\u2026';sh.results=[];sh.open=null;sh.portions=null;render();
   try{
-    const types=sh.src==='brand'?'Branded':'Foundation,SR Legacy,Survey (FNDDS)';
+    const branded=sh.src==='brand';
+    const types=branded?'Branded':'Foundation,SR Legacy,Survey (FNDDS)';
     const url=FDC+'/foods/search?api_key='+encodeURIComponent(fdcKey())
-      +'&query='+encodeURIComponent(q)+'&pageSize=25'
+      +'&query='+encodeURIComponent(q)+'&pageSize=50'
       +'&dataType='+encodeURIComponent(types);
     const r=await fetch(url);
     if(r.status===429){sh.status='USDA rate limit reached. Add your own free key under Setup to raise it.';render();return;}
@@ -920,11 +1030,13 @@ async function fdcSearch(q){
       return {id:String(x.fdcId),
         /* branded rows read better as "Sweet Loren's - Chocolate Chip Cookie" */
         name:brand&&!desc.toLowerCase().startsWith(brand.toLowerCase())?brand+' - '+desc:desc,
+        brand,branded,
         per100:per100(x),
         servSize:nm(x.servingSize),
         servUnit:String(x.servingSizeUnit||'').toLowerCase(),
         servText:String(x.householdServingFullText||'').trim()};
     }).filter(x=>x.name&&x.per100.cal>0);
+    sh.results=rankResults(sh.results,q).slice(0,25);
     sh.status=sh.results.length?'':'Nothing matched. Try one or two plain words, like "pistachio" or "apple raw".';
     render();
   }catch(e){
@@ -966,10 +1078,15 @@ async function fdcOpen(id){
 /* Hand the chosen portion to the New form, where the name stays editable and
    the servings stepper already does live math. */
 function useFdc(food,label,grams){
-  const k=grams/100;
+  const k=grams/100, n=food.per100;
+  /* A whole food with no added-sugar figure genuinely has none. A packaged
+     product with no figure is unknown, and guessing zero there would flatter
+     the number that matters most. */
+  const add=n.add!=null?r1(n.add*k):(food.branded?'':0);
   sh.form={name:food.name,serving:servingText(label,grams),
-    cal:r0(food.per100.cal*k),p:r1(food.per100.p*k),
-    c:r1(food.per100.c*k),f:r1(food.per100.f*k)};
+    cal:r0(n.cal*k),p:r1(n.p*k),c:r1(n.c*k),f:r1(n.f*k),
+    sug:n.sug!=null?r1(n.sug*k):'',add,
+    addGuessed:n.add==null&&!food.branded};
   sh.qty='1';sh.keep=true;sh.mode='new';sh.status='';render();
 }
 
@@ -1072,6 +1189,7 @@ document.addEventListener('click',e=>{
     const name=v('#n_name').trim();
     if(!name){alert('Give the food a name first.');return;}
     addEntry({name,serving:v('#n_serving'),cal:v('#n_cal'),p:v('#n_p'),c:v('#n_c'),f:v('#n_f'),
+      sug:v('#n_sug'),add:v('#n_add'),
       barcode:sh.form.barcode||null}, v('#n_qty'), sh.meal, document.querySelector('#n_keep').checked);
     return;}
   if(a==='lookupmanual'){
@@ -1123,7 +1241,7 @@ document.addEventListener('click',e=>{
   if(a==='savesettings'){
     const v=id=>nm(document.querySelector(id).value);
     Object.assign(S.settings,{protein:v('#s_protein'),cal:v('#s_cal'),carbs:v('#s_carbs'),
-      fat:v('#s_fat'),lb:v('#s_lb'),heightIn:v('#s_h'),eatBack:v('#s_eat')});
+      fat:v('#s_fat'),addSugar:v('#s_sug'),lb:v('#s_lb'),heightIn:v('#s_h'),eatBack:v('#s_eat')});
     save();render();return;}
 
   if(a==='calc'){
@@ -1163,13 +1281,14 @@ document.addEventListener('click',e=>{
       const i=S.foods.findIndex(y=>y.name.toLowerCase()===String(x.name).toLowerCase());
       const rec={id:i>=0?S.foods[i].id:uid(),name:String(x.name).trim(),
         serving:String(x.serving||'1 serving'),cal:nm(x.cal),p:nm(x.p),c:nm(x.c),f:nm(x.f),
+        sug:nn(x.sug),add:nn(x.add),
         barcode:x.barcode||null,last:i>=0?S.foods[i].last:0};
       if(i>=0){S.foods[i]=rec;updated++;}else{S.foods.push(rec);added++;}
     });
     save();note.textContent=`Added ${added}, updated ${updated}.`;box.value='';return;}
   if(a==='showlist'){
     document.querySelector('#pastebox').value=JSON.stringify(
-      S.foods.map(({name,serving,cal,p,c,f})=>({name,serving,cal,p,c,f})),null,1);
+      S.foods.map(({name,serving,cal,p,c,f,sug,add})=>({name,serving,cal,p,c,f,sug,add})),null,1);
     document.querySelector('#ionote').textContent='Copy this somewhere safe.';return;}
 
   if(a==='export'){exportData();return;}
