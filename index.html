@@ -622,7 +622,7 @@ function viewSetup(){
 
 /* ============================== sheets ============================== */
 let sh={mode:'saved',q:'',sel:null,qty:'1',form:{},keep:true,meal:'Snacks',status:'',scanning:false,
-  fq:'',results:[],open:null,portions:null};
+  fq:'',results:[],open:null,portions:null,src:'generic'};
 
 function sheetHTML(){
   if(sheet==='ex') return exSheet();
@@ -668,8 +668,12 @@ function addSheet(){
     `:''}
 
     ${sh.mode==='usda'?`
+      <div class="seg" style="margin-bottom:10px">
+        <button class="${sh.src==='generic'?'on':''}" data-act="fdcsrc" data-s="generic">Generic foods</button>
+        <button class="${sh.src==='brand'?'on':''}" data-act="fdcsrc" data-s="brand">Brand names</button>
+      </div>
       <div style="display:flex;gap:8px">
-        <input id="fdq" placeholder="apple, chicken breast, pistachios" value="${esc(sh.fq)}">
+        <input id="fdq" placeholder="${sh.src==='brand'?'Sweet Loren\'s chocolate chip':'apple, chicken breast, pistachios'}" value="${esc(sh.fq)}">
         <button class="btn sm" data-act="fdcgo">Search</button>
       </div>
       ${sh.status?`<div class="small" style="margin-top:10px;color:var(--moss)">${esc(sh.status)}</div>`:''}
@@ -680,12 +684,12 @@ function addSheet(){
         ${sh.open===x.id?portionBlock(x):''}
       </div>`).join('')}
       </div>
-      <div class="tiny muted" style="margin-top:10px">Generic foods from USDA FoodData Central. Pick one to see real portions, then adjust servings on the next screen. Packaged products are better found with the scanner.</div>
+      <div class="tiny muted" style="margin-top:10px">${sh.src==='brand'?'Packaged products from USDA\'s branded catalogue, which comes from manufacturer label data. Serving sizes are the ones printed on the package. Coverage is wide but not complete, and a discontinued item may be missing.':'Whole and generic foods from USDA FoodData Central. Pick one to see real portions, then adjust servings on the next screen.'}</div>
     `:''}
 
     ${sh.mode==='scan'?`
       <div id="reader"></div>
-      <div class="small" style="margin-top:10px;min-height:20px;color:var(--moss)">${esc(sh.status)}</div>
+      <div id="scanstatus" class="small" style="margin-top:10px;min-height:20px;color:var(--moss)">${esc(sh.status)}</div>
       <div style="margin-top:8px"><div class="lab" style="margin-bottom:4px">Or type the barcode</div>
         <div style="display:flex;gap:8px"><input id="manualcode" inputmode="numeric" placeholder="0123456789012">
         <button class="btn sm" data-act="lookupmanual">Look up</button></div></div>
@@ -823,7 +827,7 @@ function addEntry(food,qty,meal,keep){
 
 /* ---- Open Food Facts ---- */
 async function lookup(code){
-  sh.status='Looking up '+code+'\u2026';render();
+  setStatus('Looking up '+code+'\u2026');
   try{
     const url='https://world.openfoodfacts.org/api/v2/product/'+encodeURIComponent(code)+
       '.json?fields=product_name,brands,serving_size,nutriments';
@@ -831,7 +835,7 @@ async function lookup(code){
     const j=await r.json();
     /* A missing barcode still returns HTTP 200, so check the body. */
     if(j.status!==1||!j.product){
-      sh.status='Not in the database. Add it under New and it saves for next time.';render();return;
+      setStatus('Not in the database. Add it under New and it saves for next time.');return;
     }
     const p=j.product, n=p.nutriments||{};
     const per=k=>n[k+'_serving'];
@@ -852,7 +856,7 @@ async function lookup(code){
     const warn=hasServing?'':'These numbers are per 100 g, not per serving. Adjust before saving.';
     if(warn){const el=document.querySelector('#n_serving');if(el)el.focus();alert(warn);}
   }catch(e){
-    sh.status='Lookup failed. Check your connection, or type the numbers under New.';render();
+    setStatus('Lookup failed. Check your connection, or type the numbers under New.');
   }
 }
 
@@ -901,16 +905,26 @@ async function fdcSearch(q){
   if(!q.trim())return;
   sh.status='Searching\u2026';sh.results=[];sh.open=null;sh.portions=null;render();
   try{
+    const types=sh.src==='brand'?'Branded':'Foundation,SR Legacy,Survey (FNDDS)';
     const url=FDC+'/foods/search?api_key='+encodeURIComponent(fdcKey())
       +'&query='+encodeURIComponent(q)+'&pageSize=25'
-      +'&dataType='+encodeURIComponent('Foundation,SR Legacy,Survey (FNDDS)');
+      +'&dataType='+encodeURIComponent(types);
     const r=await fetch(url);
     if(r.status===429){sh.status='USDA rate limit reached. Add your own free key under Setup to raise it.';render();return;}
     if(r.status===403){sh.status='USDA rejected that key. Check it under Setup.';render();return;}
     if(!r.ok){sh.status='USDA search failed ('+r.status+'). Try again shortly.';render();return;}
     const j=await r.json();
-    sh.results=(j.foods||[]).map(x=>({id:String(x.fdcId),name:String(x.description||'').trim(),
-      per100:per100(x)})).filter(x=>x.name&&x.per100.cal>0);
+    sh.results=(j.foods||[]).map(x=>{
+      const brand=String(x.brandName||x.brandOwner||'').trim();
+      const desc=String(x.description||'').trim();
+      return {id:String(x.fdcId),
+        /* branded rows read better as "Sweet Loren's - Chocolate Chip Cookie" */
+        name:brand&&!desc.toLowerCase().startsWith(brand.toLowerCase())?brand+' - '+desc:desc,
+        per100:per100(x),
+        servSize:nm(x.servingSize),
+        servUnit:String(x.servingSizeUnit||'').toLowerCase(),
+        servText:String(x.householdServingFullText||'').trim()};
+    }).filter(x=>x.name&&x.per100.cal>0);
     sh.status=sh.results.length?'':'Nothing matched. Try one or two plain words, like "pistachio" or "apple raw".';
     render();
   }catch(e){
@@ -922,7 +936,16 @@ async function fdcOpen(id){
   if(sh.open===id){sh.open=null;sh.portions=null;render();return;}
   sh.open=id;sh.portions=portionCache[id]||null;sh.status='';render();
   if(sh.portions)return;
-  const base=[{label:'1 oz',grams:28.35},{label:'100 g',grams:100}];
+  const food=sh.results.find(x=>x.id===id)||{};
+  const liquid=food.servUnit==='ml';
+  const base=[liquid?{label:'100 ml',grams:100}:{label:'1 oz',grams:28.35},
+              liquid?{label:'1 fl oz',grams:29.57}:{label:'100 g',grams:100}];
+  /* A branded label already states its serving, so skip the detail request. */
+  if(food.servSize>0){
+    const label=food.servText||`${fmtNum(food.servSize)} ${food.servUnit||'g'}`;
+    const full=[{label,grams:food.servSize}].concat(base);
+    portionCache[id]=full;sh.portions=full;render();return;
+  }
   try{
     const r=await fetch(FDC+'/food/'+encodeURIComponent(id)+'?api_key='+encodeURIComponent(fdcKey()));
     const j=r.ok?await r.json():{};
@@ -955,10 +978,19 @@ let scanner=null;
 function loadScript(src){return new Promise((res,rej)=>{
   const s=document.createElement('script');s.src=src;s.onload=res;s.onerror=rej;document.head.appendChild(s);});}
 
+/* The live camera <video> lives inside #reader. Calling render() replaces that
+   node, leaving the stream painting into a detached element, which is exactly
+   what a black viewfinder is. Patch the status line in place instead. */
+function setStatus(txt){
+  sh.status=txt;
+  const el=document.querySelector('#scanstatus');
+  if(el)el.textContent=txt; else render();
+}
+
 async function startScanner(){
   if(sh.scanning)return;
   sh.scanning=true;
-  sh.status='Starting camera\u2026';render();
+  setStatus('Starting camera\u2026');
   try{
     if(!window.Html5Qrcode) await loadScript('https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js');
     const F=window.Html5QrcodeSupportedFormats;
@@ -970,10 +1002,10 @@ async function startScanner(){
     await scanner.start({facingMode:'environment'},{fps:10,qrbox:{width:260,height:160}},
       code=>{if(!sh.scanning)return;sh.scanning=false;lookup(code);},
       ()=>{});
-    sh.status='Point at the barcode.';render();
+    setStatus('Point at the barcode.');
   }catch(e){
     sh.scanning=false;
-    sh.status='Camera unavailable. Type the barcode below instead.';render();
+    setStatus('Camera unavailable. Type the barcode below instead.');
   }
 }
 function stopScanner(){
@@ -1010,7 +1042,7 @@ document.addEventListener('click',e=>{
   if(a==='delfood'){S.foods=S.foods.filter(x=>x.id!==el.dataset.id);save();render();return;}
 
   if(a==='add'){sheet='add';sh={...sh,mode:'saved',q:'',sel:null,qty:'1',form:{},keep:true,
-    meal:el.dataset.meal,status:'',fq:'',results:[],open:null,portions:null};render();return;}
+    meal:el.dataset.meal,status:'',fq:'',results:[],open:null,portions:null,src:'generic'};render();return;}
   if(a==='mode'){
     const m=el.dataset.m;
     if(sh.mode==='scan'&&m!=='scan')stopScanner();
@@ -1047,6 +1079,12 @@ document.addEventListener('click',e=>{
     if(c)lookup(c);
     return;}
 
+  if(a==='fdcsrc'){
+    sh.src=el.dataset.s;sh.results=[];sh.open=null;sh.portions=null;sh.status='';
+    const box=document.querySelector('#fdq');if(box)sh.fq=box.value;
+    render();
+    if(sh.fq.trim())fdcSearch(sh.fq);
+    return;}
   if(a==='fdcgo'){
     const el2=document.querySelector('#fdq');
     if(el2)sh.fq=el2.value;
@@ -1069,7 +1107,7 @@ document.addEventListener('click',e=>{
   if(a==='exopen'){sheet='ex';render();return;}
   if(a==='savewatch'){
     const x={...exOf(date),watch:document.querySelector('#watchval').value.trim()};
-    S.ex[date]=x;save();render();return;}
+    S.ex[date]=x;save();sheet=null;render();return;}
   if(a==='addact'){
     const sel=document.querySelector('#actsel');
     const mins=document.querySelector('#actmin').value;
