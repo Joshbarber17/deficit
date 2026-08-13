@@ -879,7 +879,7 @@ function unitRow(serving,inputId){
   </div>`;
 }
 /* One serving is the sane default; weights step by a useful amount instead. */
-const stepFor=unit=>unit==='g'?5:unit==='oz'?0.5:1;
+const stepFor=unit=>unit==='g'?5:unit==='oz'?0.5:0.5;
 
 function qtyMacroText(f,qty){
   const q=nm(qty);
@@ -1306,10 +1306,19 @@ document.addEventListener('click',e=>{
     if(box)box.value=amt;
     render();return;}
   if(a==='qstep'){
-    const base=activeBase(), step=stepFor(sh.unit);
+    const base=activeBase(), step=stepFor(sh.unit), dir=+el.dataset.n;
     const box=document.querySelector('#qty')||document.querySelector('#n_qty');
     let amt=nm(box?box.value:qtyToAmt(sh.qty,sh.unit,base));
-    amt=Math.round((amt+step*(+el.dataset.n))*100)/100;
+    if(sh.unit==='serv'){
+      /* Move to the next half-serving in that direction, so an odd typed
+         value like 1.3 rejoins the grid instead of stranding you off it. */
+      const n=dir>0?Math.floor(amt/step)+1:Math.ceil(amt/step)-1;
+      amt=Math.round(n*step*100)/100;
+    } else {
+      /* Weights keep exactly what you typed; a scale reading of 47 g should
+         step to 52, not snap to 50. */
+      amt=Math.round((amt+step*dir)*100)/100;
+    }
     const floor=sh.unit==='serv'?0.5:sh.unit==='oz'?0.5:5;
     if(amt<floor)amt=floor;
     if(box)box.value=amt;
