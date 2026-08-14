@@ -268,7 +268,7 @@ const VERSES=[
 
 /* ============================== model ============================== */
 const DEFAULTS={
-  settings:{cal:2200,protein:170,carbs:200,fat:70,lb:190,heightIn:71,eatBack:75,lastBackup:0,fdcKey:'',lastVerse:-1,addSugar:36,satFat:15},
+  settings:{cal:2200,protein:170,carbs:200,fat:70,lb:190,heightIn:71,eatBack:75,lastBackup:0,fdcKey:'',lastVerse:-1,addSugar:36,satPct:6},
   /* body: kept in the model so old backups restore cleanly and a future
      weight / body-fat screen has somewhere to write. No UI reads it now. */
   foods:[], logs:{}, ex:{}, body:{}
@@ -353,6 +353,14 @@ function sugarOf(d){
   });
   return {tot,add,nat:Math.max(tot-add,0),missTot,missAdd};
 }
+/* AHA frames saturated fat as a share of what you actually eat, so the cap
+   has to ride the ceiling: burn 400 calories and eat them back and the cap
+   moves with it. 9 calories per gram of fat. */
+function satCapOf(d){
+  const pct=nm(S.settings.satPct)||6;
+  return Math.max(ceilingOf(d)*(pct/100)/9,1);
+}
+
 /* Unsaturated is derived: total fat minus saturated. */
 function fatOf(d){
   let tot=0,sat=0,missSat=0;
@@ -468,7 +476,7 @@ function addFlag(v){
 }
 function satFlag(v){
   if(v==null||!(v>0))return '';
-  const hot=v>=nm(S.settings.satFat)/2;
+  const hot=v>=satCapOf(date)/2;
   return `<span class="flag${hot?' hot':''}">${r1(v)}g sat</span>`;
 }
 /* One call site per row keeps the chips in a consistent order. */
@@ -487,11 +495,10 @@ function viewToday(){
   const calState=barState(t.cal,ceil,WARN_CAL), near=calState==='warn';
   const cState=barState(t.c,st.carbs,nm(st.carbs)*0.1);
   const fState=barState(t.f,st.fat,nm(st.fat)*0.1);
-  const ft=fatOf(date), satState=barState(ft.sat,nm(st.satFat),nm(st.satFat)*0.15);
-  const fatScale=Math.max(nm(st.fat),t.f,1);
+  const ft=fatOf(date), satCap=satCapOf(date);
+  const satState=barState(ft.sat,satCap,satCap*0.15);
   const sg=sugarOf(date), aState=barState(sg.add,nm(st.addSugar),nm(st.addSugar)*0.15);
-  /* one shared scale so the two sugar bars can be compared by eye */
-  const sugScale=Math.max(nm(st.addSugar),sg.tot,1);
+
   const s=streakInfo(), x=exOf(date);
 
   return `
@@ -543,19 +550,19 @@ function viewToday(){
 
       <div class="row tiny" style="margin-bottom:5px">
         <span class="lab">Saturated</span>
-        <span class="mono" style="font-weight:600;color:${satState==='over'?'var(--red-ink)':satState==='warn'?'var(--clay)':'var(--ink)'}">${r1(ft.sat)} / ${r0(st.satFat)}g</span>
+        <span class="mono" style="font-weight:600;color:${satState==='over'?'var(--red-ink)':satState==='warn'?'var(--clay)':'var(--ink)'}">${r1(ft.sat)} / ${r1(satCap)}g</span>
       </div>
-      ${barHTML(ft.sat,fatScale,satState)}
+      ${barHTML(ft.sat,satCap,satState)}
 
       <div class="row tiny" style="margin:12px 0 5px">
         <span class="lab">Unsaturated</span>
-        <span class="mono" style="font-weight:600">${r1(ft.uns)}g</span>
+        <span class="mono" style="font-weight:600">${r1(ft.uns)}<span class="muted" style="font-weight:400"> of ${r1(ft.tot)}g</span></span>
       </div>
-      ${barHTML(ft.uns,fatScale,'nat')}
+      ${barHTML(ft.uns,Math.max(ft.tot,1),'nat')}
 
       <div class="tiny muted" style="margin-top:8px">${ft.missSat?
         `${ft.missSat} ${ft.missSat===1?'item has':'items have'} no saturated figure, so saturated reads as a floor and unsaturated reads high.`:
-        'Unsaturated is what is left after saturated, so the split moves with your choices.'}</div>
+        `Cap is ${nm(st.satPct)||6}% of today's ${r0(ceilingOf(date))} calorie ceiling. Eat back more burn and it rises with you.`}</div>
     </div>
 
     <div style="margin-top:18px;padding-top:14px;border-top:1px solid var(--line)">
@@ -568,18 +575,18 @@ function viewToday(){
         <span class="lab">Added</span>
         <span class="mono" style="font-weight:600;color:${aState==='over'?'var(--red-ink)':aState==='warn'?'var(--clay)':'var(--ink)'}">${r1(sg.add)} / ${r0(st.addSugar)}g</span>
       </div>
-      ${barHTML(sg.add,sugScale,aState)}
+      ${barHTML(sg.add,nm(st.addSugar),aState)}
 
       <div class="row tiny" style="margin:12px 0 5px">
         <span class="lab">Natural</span>
-        <span class="mono" style="font-weight:600">${r1(sg.nat)}g</span>
+        <span class="mono" style="font-weight:600">${r1(sg.nat)}<span class="muted" style="font-weight:400"> of ${r1(sg.tot)}g</span></span>
       </div>
-      ${barHTML(sg.nat,sugScale,'nat')}
+      ${barHTML(sg.nat,Math.max(sg.tot,1),'nat')}
 
       <div class="tiny muted" style="margin-top:8px">${
         sg.missTot?`${sg.missTot} ${sg.missTot===1?'item has':'items have'} no sugar data, so both numbers read low. Edit the food to fill them in.`:
         sg.missAdd?`${sg.missAdd} ${sg.missAdd===1?'item has':'items have'} no added-sugar figure, so added reads as a floor, not a total.`:
-        'Both bars share one scale, so the split is honest at a glance.'}</div>
+        'Added sugar is a flat daily cap. Natural sugar rides along and is not counted against you.'}</div>
     </div>
   </div>
 
@@ -671,7 +678,7 @@ function viewSetup(){
       <div><div class="lab" style="margin-bottom:4px">Carbs (g)</div><input id="s_carbs" inputmode="decimal" value="${st.carbs}"></div>
       <div><div class="lab" style="margin-bottom:4px">Fat (g)</div><input id="s_fat" inputmode="decimal" value="${st.fat}"></div>
       <div><div class="lab" style="margin-bottom:4px">Added sugar cap (g)</div><input id="s_sug" inputmode="decimal" value="${st.addSugar}"></div>
-      <div><div class="lab" style="margin-bottom:4px">Saturated fat cap (g)</div><input id="s_sat" inputmode="decimal" value="${st.satFat}"></div>
+      <div><div class="lab" style="margin-bottom:4px">Saturated fat (% of cal)</div><input id="s_sat" inputmode="decimal" value="${st.satPct}"></div>
       <div><div class="lab" style="margin-bottom:4px">Body weight (lb)</div><input id="s_lb" inputmode="decimal" value="${st.lb}"></div>
       <div><div class="lab" style="margin-bottom:4px">Height (in)</div><input id="s_h" inputmode="decimal" value="${st.heightIn}"></div>
       <div><div class="lab" style="margin-bottom:4px">Eat back burn (%)</div><input id="s_eat" inputmode="numeric" value="${st.eatBack}"></div>
@@ -1385,7 +1392,7 @@ document.addEventListener('click',e=>{
   if(a==='savesettings'){
     const v=id=>nm(document.querySelector(id).value);
     Object.assign(S.settings,{protein:v('#s_protein'),cal:v('#s_cal'),carbs:v('#s_carbs'),
-      fat:v('#s_fat'),addSugar:v('#s_sug'),satFat:v('#s_sat'),lb:v('#s_lb'),heightIn:v('#s_h'),eatBack:v('#s_eat')});
+      fat:v('#s_fat'),addSugar:v('#s_sug'),satPct:v('#s_sat'),lb:v('#s_lb'),heightIn:v('#s_h'),eatBack:v('#s_eat')});
     save();render();return;}
 
   if(a==='calc'){
@@ -1478,6 +1485,12 @@ document.addEventListener('input',e=>{
 (async function(){
   const loaded=await loadState();
   if(loaded)S={...DEFAULTS,...loaded,settings:{...DEFAULTS.settings,...(loaded.settings||{})}};
+  /* the saturated cap used to be stored as flat grams; convert once */
+  if(S.settings.satFat!=null&&loaded&&(loaded.settings||{}).satPct==null){
+    const pct=nm(S.settings.satFat)*9/Math.max(nm(S.settings.cal),1)*100;
+    S.settings.satPct=Math.round(pct*10)/10||6;
+  }
+  delete S.settings.satFat;
 
   /* Shortcuts hand off today's active energy as ?burn=NNN */
   const q=new URLSearchParams(location.search);
