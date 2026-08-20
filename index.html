@@ -93,6 +93,9 @@
   .step:active{background:var(--moss-soft)}
 
   .dots{display:flex;gap:5px}
+  .day{display:flex;flex-direction:column;align-items:center;gap:4px}
+  .day .dl{font-size:9px;font-weight:600;letter-spacing:.02em;color:var(--muted);line-height:1}
+  .day.now .dl{color:var(--ink);font-weight:800}
   .dot{width:20px;height:20px;border-radius:999px;border:1px solid var(--line)}
   .dot.hit{background:var(--moss);border-color:var(--moss)}
   .dot.wip{background:var(--gold);border-color:var(--gold)}
@@ -285,6 +288,8 @@ function pretty(s){
   const[y,m,d]=s.split('-').map(Number);
   return new Date(y,m-1,d).toLocaleDateString(undefined,{weekday:'short',month:'short',day:'numeric'});
 }
+const DOW=['S','M','T','W','Th','F','Sa'];
+function dayLetter(ds){const[y,m,d]=ds.split('-').map(Number);return DOW[new Date(y,m-1,d).getDay()];}
 const uid=()=>Math.random().toString(36).slice(2,10);
 const nm=v=>{const n=parseFloat(v);return isNaN(n)?0:n;};
 /* Sugar fields are nullable on purpose: a missing added-sugar value must never
@@ -545,7 +550,7 @@ function viewToday(){
     <div style="margin-top:18px;padding-top:14px;border-top:1px solid var(--line)">
       <div class="row" style="align-items:baseline;margin-bottom:12px">
         <div class="lab">Total fat</div>
-        <div class="mono" style="font-size:19px;font-weight:700;color:${fState==='over'?'var(--red-ink)':fState==='warn'?'var(--clay)':'var(--ink)'}">${r0(t.f)}<span class="muted small" style="font-weight:500"> / ${r0(st.fat)}g</span></div>
+        <div class="mono" style="font-size:19px;font-weight:700;color:${fState==='over'?'var(--red-ink)':fState==='warn'?'var(--clay)':'var(--ink)'}">${r1(t.f)}<span class="muted small" style="font-weight:500"> / ${r0(st.fat)}g</span></div>
       </div>
 
       <div class="row tiny" style="margin-bottom:5px">
@@ -562,7 +567,7 @@ function viewToday(){
 
       <div class="tiny muted" style="margin-top:8px">${ft.missSat?
         `${ft.missSat} ${ft.missSat===1?'item has':'items have'} no saturated figure, so saturated reads as a floor and unsaturated reads high.`:
-        `Cap is ${nm(st.satPct)||6}% of today's ${r0(ceilingOf(date))} calorie ceiling. Eat back more burn and it rises with you.`}</div>
+        `Cap is ${nm(st.satPct)||6}% of today's ${r0(ceilingOf(date))} calorie ceiling: ${r0(ceilingOf(date)*(nm(st.satPct)||6)/100)} cal \u00f7 9 cal per gram = ${r1(satCap)}g. Eat back more burn and it rises with you.`}</div>
     </div>
 
     <div style="margin-top:18px;padding-top:14px;border-top:1px solid var(--line)">
@@ -603,7 +608,8 @@ function viewToday(){
     <div class="row">
       <div><div class="mono" style="font-size:20px;font-weight:700">${s.cur}<span class="small muted" style="font-weight:500"> ${s.cur===1?'day':'days'}</span></div>
         <div class="lab" style="margin-top:2px">Current streak</div></div>
-      <div class="dots">${s.recent.map(r=>`<div class="dot ${r.state}"></div>`).join('')}</div>
+      <div class="dots">${s.recent.map(r=>`<div class="day ${r.d===todayStr()?'now':''}">
+        <div class="dot ${r.state}"></div><div class="dl">${dayLetter(r.d)}</div></div>`).join('')}</div>
     </div>
     <div class="row" style="margin-top:14px;padding-top:12px;border-top:1px solid var(--line);justify-content:flex-start;gap:24px">
       <div><div class="lab">7 days</div><div class="mono" style="font-weight:600">${s.w}</div></div>
