@@ -129,6 +129,12 @@
   .flag{display:inline-block;background:var(--clay-soft);color:var(--clay);border-radius:6px;
       padding:1px 6px;font-size:10px;font-weight:700;white-space:nowrap;margin-left:6px}
   .flag.hot{background:#FFE2E2;color:var(--red-ink)}
+  .tag{display:inline-block;background:var(--paper);color:var(--muted);border-radius:6px;
+      padding:1px 6px;font-size:10px;font-weight:700;margin-left:6px;white-space:nowrap}
+  .parts{font-size:11px;color:var(--muted);margin-top:6px;padding-left:9px;border-left:2px solid var(--line);line-height:1.5}
+  .parts b{color:var(--ink);font-weight:600}
+  .linkbtn{background:none;border:0;color:var(--moss);font-weight:600;font-size:12px;cursor:pointer;
+      font-family:inherit;padding:6px 0 0}
   .banner{background:var(--clay-soft);border:1px solid var(--clay);color:var(--clay);
       border-radius:10px;padding:10px 12px;font-size:13px;margin-bottom:10px}
   .note{background:var(--paper);border-radius:10px;padding:12px 14px;font-size:13px;color:var(--ink)}
@@ -359,12 +365,45 @@ const burnFor=(met,mins)=>r0(Math.max(met-1,0)*(nm(S.settings.lb)*0.4536)*(nm(mi
 
 const logOf=d=>S.logs[d]||[];
 const exOf=d=>S.ex[d]||{watch:'',items:[]};
+/* ---- meals: several logged foods saved as one library item ---- */
+/* The components are snapshotted, not referenced, so a meal keeps meaning
+   what it meant even if a component food is later edited or deleted. */
+function composeMeal(entries){
+  const items=[];
+  entries.forEach(e=>{
+    /* a meal inside a meal is flattened; nesting helps nobody */
+    if(e.items)e.items.forEach(i=>items.push({...i,qty:nm(i.qty)*nm(e.qty)}));
+    else items.push({name:e.name,serving:e.serving,qty:nm(e.qty)||1,cal:nm(e.cal),p:nm(e.p),
+      c:nm(e.c),f:nm(e.f),sat:nn(e.sat),sug:nn(e.sug),add:nn(e.add)});
+  });
+  const sum=k=>items.reduce((a,i)=>a+nm(i[k])*i.qty,0);
+  /* a nullable field stays null for display if any part is unknown; the
+     daily totals walk the parts themselves so known ones still count */
+  const sumN=k=>items.some(i=>i[k]==null)?null:items.reduce((a,i)=>a+i[k]*i.qty,0);
+  const r=v=>v==null?null:Math.round(v*10)/10;
+  return {serving:'1 meal',items,cal:r0(sum('cal')),p:r(sum('p')),c:r(sum('c')),f:r(sum('f')),
+    sat:r(sumN('sat')),sug:r(sumN('sug')),add:r(sumN('add'))};
+}
+const mealParts=items=>items.map(i=>(i.qty!==1?fmtNum(i.qty)+'\u00d7 ':'')+i.name).join(', ');
+
+/* Yields every real food in a day's log with its effective multiplier,
+   opening meals up so a missing figure on one component is counted as one
+   missing component rather than wiping out the whole meal. */
+function leaves(d){
+  const out=[];
+  logOf(d).forEach(e=>{
+    if(e.items)e.items.forEach(i=>out.push({e:i,k:nm(i.qty)*nm(e.qty)}));
+    else out.push({e,k:nm(e.qty)});
+  });
+  return out;
+}
+
 /* Natural sugar is derived, never entered: total minus added. */
 function sugarOf(d){
   let tot=0,add=0,missTot=0,missAdd=0;
-  logOf(d).forEach(e=>{
-    if(e.sug==null)missTot++; else tot+=e.sug*e.qty;
-    if(e.add==null)missAdd++; else add+=e.add*e.qty;
+  leaves(d).forEach(({e,k})=>{
+    if(e.sug==null)missTot++; else tot+=e.sug*k;
+    if(e.add==null)missAdd++; else add+=e.add*k;
   });
   return {tot,add,nat:Math.max(tot-add,0),missTot,missAdd};
 }
@@ -379,9 +418,9 @@ function satCapOf(d){
 /* Unsaturated is derived: total fat minus saturated. */
 function fatOf(d){
   let tot=0,sat=0,missSat=0;
-  logOf(d).forEach(e=>{
-    tot+=nm(e.f)*e.qty;
-    if(e.sat==null)missSat++; else sat+=e.sat*e.qty;
+  leaves(d).forEach(({e,k})=>{
+    tot+=nm(e.f)*k;
+    if(e.sat==null)missSat++; else sat+=e.sat*k;
   });
   return {tot,sat,uns:Math.max(tot-sat,0),missSat};
 }
@@ -669,38 +708,60 @@ function mealHTML(meal){
         <button class="plus" data-act="add" data-meal="${meal}">+</button>
       </div>
     </div>
-    ${items.map(e=>`<div class="item">
-      <div style="min-width:0;padding-right:10px">
-        <div style="font-size:14px">${esc(e.name)}</div>
-        <div class="tiny muted">${esc(scaleServing(e.serving||'1 serving',e.qty))} &middot; P ${r0(e.p*e.qty)} C ${r0(e.c*e.qty)} F ${r0(e.f*e.qty)}${e.sat!=null?satFlag(e.sat*e.qty):(nm(e.f)>0?'<span class="flag">sat ?</span>':'')}${e.add!=null?addFlag(e.add*e.qty):(e.sug!=null?'<span class="flag">added ?</span>':'')}</div>
+    ${items.map(e=>`<div class="item" style="flex-wrap:wrap">
+      <div style="min-width:0;padding-right:10px;flex:1" ${e.items?`data-act="mealinfo" data-id="${e.id}"`:''}>
+        <div style="font-size:14px">${esc(e.name)}${e.items?'<span class="tag">meal</span>':''}</div>
+        <div class="tiny muted">${e.items
+          ?`${e.qty===1?'':fmtNum(e.qty)+' \u00d7 '}${e.items.length} items`
+          :esc(scaleServing(e.serving||'1 serving',e.qty))} &middot; P ${r0(e.p*e.qty)} C ${r0(e.c*e.qty)} F ${r0(e.f*e.qty)}${e.sat!=null?satFlag(e.sat*e.qty):(nm(e.f)>0?'<span class="flag">sat ?</span>':'')}${e.add!=null?addFlag(e.add*e.qty):(e.sug!=null?'<span class="flag">added ?</span>':'')}</div>
       </div>
       <div style="display:flex;align-items:center;gap:10px">
         <span class="mono" style="font-size:14px;font-weight:600">${r0(e.cal*e.qty)}</span>
         <button class="x" data-act="del" data-id="${e.id}">&times;</button>
-      </div></div>`).join('')}
+      </div>
+      ${e.items&&openMeals.has(e.id)?`<div class="parts" style="flex-basis:100%">${partsHTML(e.items,e.qty)}</div>`:''}
+    </div>`).join('')}
+    ${items.length>=2?`<button class="linkbtn" data-act="savemeal" data-meal="${meal}">Save these ${items.length} as a meal</button>`:''}
   </div>`;
 }
 
+/* Expanded component list for a meal, scaled by how much of it was eaten. */
+function partsHTML(items,mult){
+  mult=nm(mult)||1;
+  return items.map(i=>{const k=nm(i.qty)*mult;
+    return `<div><b>${esc(i.name)}</b> &middot; ${esc(scaleServing(i.serving||'1 serving',k))} &middot; ${r0(nm(i.cal)*k)} cal &middot; P ${r1(nm(i.p)*k)}</div>`;}).join('');
+}
+let openMeals=new Set();
+
 /* ------------------------------- foods ------------------------------- */
 let foodQuery='';
-function viewFoods(){
+function foodsListHTML(){
+  const q=foodQuery.trim().toLowerCase();
   const list=[...S.foods].sort((a,b)=>a.name.localeCompare(b.name))
-    .filter(f=>!foodQuery||f.name.toLowerCase().includes(foodQuery.toLowerCase()));
+    .filter(f=>!q||f.name.toLowerCase().includes(q));
+  if(!list.length)return S.foods.length
+    ?`<div class="card small muted">Nothing matches "${esc(foodQuery)}".</div>`
+    :`<div class="card small muted">Nothing saved yet. Scan a barcode or add a food while logging and it lands here.</div>`;
+  return list.map(f=>`<div class="food">
+    <div class="row">
+      <div style="min-width:0"><div style="font-size:14px;font-weight:600">${esc(f.name)}${f.items?'<span class="tag">meal</span>':''}</div>
+        <div class="tiny muted">${f.items?`${f.items.length} items`:esc(f.serving)} &middot; ${f.cal} cal &middot; P ${f.p} C ${f.c} F ${f.f}${f.barcode?' &middot; scanned':''}${flags(f)}</div></div>
+      <button class="x" data-act="delfood" data-id="${f.id}">&times;</button>
+    </div>
+    ${f.items?`<div class="parts">${partsHTML(f.items,1)}</div>`:''}
+  </div>`).join('');
+}
+function viewFoods(){
   return `
   <div class="card" style="padding:12px 14px">
-    <input id="fq" placeholder="Search saved foods" value="${esc(foodQuery)}">
+    <input id="fq" placeholder="Search saved foods" value="${esc(foodQuery)}"
+      autocapitalize="off" autocorrect="off" spellcheck="false">
     <div style="display:flex;gap:8px;margin-top:10px">
       <button class="btn sm" style="flex:1" data-act="add" data-meal="Snacks">Add food</button>
       <button class="btn ghost sm" style="flex:1" data-act="io">Import / back up</button>
     </div>
   </div>
-  ${list.length?'':`<div class="card small muted">Nothing saved yet. Scan a barcode or add a food while logging and it lands here.</div>`}
-  ${list.map(f=>`<div class="food">
-    <div class="row">
-      <div><div style="font-size:14px;font-weight:600">${esc(f.name)}</div>
-        <div class="tiny muted">${esc(f.serving)} &middot; ${f.cal} cal &middot; P ${f.p} C ${f.c} F ${f.f}${f.barcode?' &middot; scanned':''}${flags(f)}</div></div>
-      <button class="x" data-act="delfood" data-id="${f.id}">&times;</button>
-    </div></div>`).join('')}
+  <div id="foodslist">${foodsListHTML()}</div>
   `;
 }
 
@@ -797,18 +858,67 @@ function viewSetup(){
 
 /* ============================== sheets ============================== */
 let sh={mode:'saved',q:'',sel:null,qty:'1',form:{},keep:true,meal:'Snacks',status:'',scanning:false,
-  fq:'',results:[],open:null,portions:null,src:'generic',unit:'serv'};
+  fq:'',results:[],open:null,portions:null,src:'generic',unit:'serv',drop:new Set()};
 
 function sheetHTML(){
   if(sheet==='water') return waterSheet();
+  if(sheet==='meal') return mealSheet();
   if(sheet==='ex') return exSheet();
   if(sheet==='io') return ioSheet();
   return addSheet();
 }
 
-function addSheet(){
+/* A meal is eaten as saved: no stepper. Each part gets an x so one thing can
+   be left off today without touching the saved meal. */
+function mealPickHTML(x){
+  const kept=x.items.filter((_,i)=>!sh.drop.has(i));
+  const m=composeMeal(kept.map(i=>({...i})));
+  return `<div style="margin-top:12px;padding-top:12px;border-top:1px solid var(--line)" data-stop data-keepopen>
+    ${x.items.map((i,idx)=>{const gone=sh.drop.has(idx);
+      return `<div class="row" style="padding:6px 0;${gone?'opacity:.35':''}">
+        <div class="small" style="min-width:0;padding-right:10px;${gone?'text-decoration:line-through':''}">
+          ${esc(i.name)}<span class="muted"> &middot; ${esc(scaleServing(i.serving||'1 serving',i.qty))}</span></div>
+        <div style="display:flex;align-items:center;gap:10px;flex:0 0 auto">
+          <span class="mono small" style="font-weight:600">${r0(nm(i.cal)*nm(i.qty))}</span>
+          <button class="x" data-act="mealdrop" data-i="${idx}" style="color:var(--muted)">${gone?'&#8634;':'&times;'}</button>
+        </div></div>`;}).join('')}
+    <div class="mono small" style="margin-top:10px;padding-top:10px;border-top:1px solid var(--line)">
+      ${m.cal} cal \u00b7 P ${r1(m.p)} \u00b7 C ${r1(m.c)} \u00b7 F ${r1(m.f)}${m.sat!=null?` (${r1(m.sat)} sat)`:''}${m.sug!=null?` \u00b7 sugar ${r1(m.sug)}${m.add!=null?` (${r1(m.add)} added)`:''}`:''}</div>
+    <button class="btn" style="margin-top:10px" data-act="addsel" data-id="${x.id}" ${kept.length?'':'disabled'}>Add to ${sh.meal.toLowerCase()}</button>
+  </div>`;
+}
+
+/* Rendered on its own so typing can refresh the results without rebuilding
+   the sheet. Rebuilding destroys the <input> mid-keystroke, which on iOS
+   drops autocorrect state and shoves the list around under your thumb. */
+function savedListHTML(){
+  const q=sh.q.trim().toLowerCase();
   const list=[...S.foods].sort((a,b)=>(b.last||0)-(a.last||0))
-    .filter(f=>!sh.q||f.name.toLowerCase().includes(sh.q.toLowerCase()));
+    .filter(f=>!q||f.name.toLowerCase().includes(q));
+  if(!list.length)return S.foods.length
+    ?`<div class="card small muted">Nothing matches "${esc(sh.q)}".</div>`
+    :`<div class="card small muted">Nothing here yet. Scan a barcode or add it under New.</div>`;
+  return list.map(x=>`<div class="food ${sh.sel===x.id?'sel':''}" data-act="pick" data-id="${x.id}">
+        <div class="row"><div><div style="font-size:14px;font-weight:600">${esc(x.name)}</div>
+          <div class="tiny muted">${x.items?`${x.items.length} items`:esc(x.serving)} &middot; P ${x.p} C ${x.c} F ${x.f}${flags(x)}${x.items?'<span class="tag">meal</span>':''}</div></div>
+          <div class="mono" style="font-weight:600">${x.cal}</div></div>
+        ${sh.sel===x.id&&x.items?mealPickHTML(x):''}
+        ${sh.sel===x.id&&!x.items?`<div style="margin-top:12px;padding-top:12px;border-top:1px solid var(--line)" data-stop data-keepopen>
+          <div class="lab" style="margin-bottom:5px">How much</div>
+          ${unitRow(x.serving,'qty')}
+          <div style="display:flex;gap:8px;align-items:center">
+            <button class="step" data-act="qstep" data-n="-1">&minus;</button>
+            <input id="qty" inputmode="decimal" value="${esc(qtyToAmt(sh.qty,sh.unit,servingGrams(x.serving)))}" style="width:64px;text-align:center">
+            <button class="step" data-act="qstep" data-n="1">+</button>
+            <span class="small" id="qtyserv" style="flex:1;text-align:right">${esc(scaleServing(x.serving,sh.qty))}</span>
+          </div>
+          <div class="mono small" id="qtymac" style="margin-top:10px;color:var(--ink)">${qtyMacroText(x,sh.qty)}</div>
+          <button class="btn" style="margin-top:10px" data-act="addsel" data-id="${x.id}">Add to ${sh.meal.toLowerCase()}</button>
+        </div>`:''}
+      </div>`).join('');
+}
+
+function addSheet(){
   const f=sh.form;
   return `<div class="sheet-bg" data-act="closebg"><div class="sheet" data-stop>
     <div class="row" style="margin-bottom:14px">
@@ -823,25 +933,9 @@ function addSheet(){
     </div>
 
     ${sh.mode==='saved'?`
-      <input id="sq" placeholder="Search saved foods" value="${esc(sh.q)}" style="margin-bottom:10px">
-      ${list.length?'':`<div class="card small muted">Nothing here yet. Scan a barcode or add it under New.</div>`}
-      ${list.map(x=>`<div class="food ${sh.sel===x.id?'sel':''}" data-act="pick" data-id="${x.id}">
-        <div class="row"><div><div style="font-size:14px;font-weight:600">${esc(x.name)}</div>
-          <div class="tiny muted">${esc(x.serving)} &middot; P ${x.p} C ${x.c} F ${x.f}${flags(x)}</div></div>
-          <div class="mono" style="font-weight:600">${x.cal}</div></div>
-        ${sh.sel===x.id?`<div style="margin-top:12px;padding-top:12px;border-top:1px solid var(--line)" data-stop data-keepopen>
-          <div class="lab" style="margin-bottom:5px">How much</div>
-          ${unitRow(x.serving,'qty')}
-          <div style="display:flex;gap:8px;align-items:center">
-            <button class="step" data-act="qstep" data-n="-1">&minus;</button>
-            <input id="qty" inputmode="decimal" value="${esc(qtyToAmt(sh.qty,sh.unit,servingGrams(x.serving)))}" style="width:64px;text-align:center">
-            <button class="step" data-act="qstep" data-n="1">+</button>
-            <span class="small" id="qtyserv" style="flex:1;text-align:right">${esc(scaleServing(x.serving,sh.qty))}</span>
-          </div>
-          <div class="mono small" id="qtymac" style="margin-top:10px;color:var(--ink)">${qtyMacroText(x,sh.qty)}</div>
-          <button class="btn" style="margin-top:10px" data-act="addsel" data-id="${x.id}">Add to ${sh.meal.toLowerCase()}</button>
-        </div>`:''}
-      </div>`).join('')}
+      <input id="sq" placeholder="Search saved foods" value="${esc(sh.q)}" style="margin-bottom:10px"
+        autocapitalize="off" autocorrect="off" spellcheck="false">
+      <div id="savedlist">${savedListHTML()}</div>
     `:''}
 
     ${sh.mode==='usda'?`
@@ -990,6 +1084,29 @@ function portionBlock(food){
   </div>`;
 }
 
+let mealSave={slot:'',keep:true};
+function mealSheet(){
+  const entries=logOf(date).filter(e=>e.meal===mealSave.slot);
+  const m=composeMeal(entries);
+  const existing=S.foods.find(x=>x.items&&x.name.toLowerCase()===(mealSave.name||'').trim().toLowerCase());
+  return `<div class="sheet-bg center" data-act="closebg"><div class="sheet mid" data-stop>
+    <div class="row" style="margin-bottom:4px">
+      <div style="font-weight:700;font-size:15px">Save as a meal</div>
+      <button class="x" data-act="close" style="color:var(--muted);font-size:22px">&times;</button>
+    </div>
+    <div class="mono small muted" style="margin-bottom:12px">${m.items.length} items \u00b7 ${m.cal} cal \u00b7 P ${r1(m.p)} \u00b7 C ${r1(m.c)} \u00b7 F ${r1(m.f)}</div>
+    <div class="parts" style="margin:0 0 14px">${partsHTML(m.items,1)}</div>
+    <div class="lab" style="margin-bottom:5px">Name</div>
+    <input id="mealname" placeholder="Weekday breakfast" value="${esc(mealSave.name||'')}" autocapitalize="sentences">
+    <label class="small" style="display:flex;gap:8px;align-items:center;margin-top:12px">
+      <input type="checkbox" id="mealkeep" ${mealSave.keep?'checked':''} style="width:auto">
+      Keep these in today's log</label>
+    <div class="tiny muted" style="margin-top:6px">Uncheck if you're only building the meal for later and didn't eat it today.</div>
+    <button class="btn" style="margin-top:14px" data-act="domealsave">Save meal</button>
+    <div class="tiny muted" style="margin-top:8px">It lands in your foods. Saving another with the same name replaces it.</div>
+  </div></div>`;
+}
+
 function waterSheet(){
   const oz=waterTotal(date), goal=Math.max(nm(S.settings.waterOz),1);
   const left=goal-oz;
@@ -1078,6 +1195,7 @@ function weighed(food,qty){
 function addEntry(food,qty,meal,keep){
   const one={serving:food.serving||'1 serving',cal:nm(food.cal),p:nm(food.p),c:nm(food.c),
     f:nm(food.f),sug:nn(food.sug),add:nn(food.add),sat:nn(food.sat)};
+  if(food.items)one.items=JSON.parse(JSON.stringify(food.items));
   const e={id:uid(),name:food.name,meal,...one,qty:nm(qty)||1,...(weighed(food,qty)||{})};
   setLog(date,[...logOf(date),e]);
   if(keep){
@@ -1368,7 +1486,7 @@ document.addEventListener('click',e=>{
   if(a==='delfood'){S.foods=S.foods.filter(x=>x.id!==el.dataset.id);save();render();return;}
 
   if(a==='add'){sheet='add';sh={...sh,mode:'saved',q:'',sel:null,qty:'1',form:{},keep:true,
-    meal:el.dataset.meal,status:'',fq:'',results:[],open:null,portions:null,src:'generic',unit:'serv'};render();return;}
+    meal:el.dataset.meal,status:'',fq:'',results:[],open:null,portions:null,src:'generic',unit:'serv',drop:new Set()};render();return;}
   if(a==='mode'){
     const m=el.dataset.m;
     if(sh.mode==='scan'&&m!=='scan')stopScanner();
@@ -1379,8 +1497,14 @@ document.addEventListener('click',e=>{
     /* Taps inside the open servings row must not fold the card shut. */
     if(e.target.closest('[data-keepopen]'))return;
     const id=el.dataset.id;
-    if(sh.sel===id)sh.sel=null; else {sh.sel=id;sh.qty='1';sh.unit='serv';}
+    if(sh.sel===id)sh.sel=null; else {sh.sel=id;sh.qty='1';sh.unit='serv';sh.drop=new Set();}
     render();return;}
+  if(a==='mealdrop'){
+    const i=+el.dataset.i;
+    if(sh.drop.has(i))sh.drop.delete(i);else sh.drop.add(i);
+    const box=document.querySelector('#savedlist');
+    if(box)box.innerHTML=savedListHTML();
+    return;}
   if(a==='qunit'){
     const base=activeBase();
     /* keep the same real amount of food, just expressed differently */
@@ -1410,7 +1534,14 @@ document.addEventListener('click',e=>{
     updateQtyPreview();updateNewPreview();return;}
   if(a==='addsel'){
     const f=S.foods.find(x=>x.id===el.dataset.id);
-    if(f){f.last=Date.now();addEntry(f,sh.qty,sh.meal,false);}
+    if(!f)return;
+    f.last=Date.now();
+    if(f.items){
+      /* log what's left after any parts were struck off; the saved meal is untouched */
+      const kept=f.items.filter((_,i)=>!sh.drop.has(i));
+      if(!kept.length)return;
+      addEntry({name:f.name,...composeMeal(kept.map(i=>({...i})))},'1',sh.meal,false);
+    } else addEntry(f,sh.qty,sh.meal,false);
     return;}
   if(a==='addnew'){
     const v=id=>{const n=document.querySelector(id);return n?n.value:'';};
@@ -1449,6 +1580,28 @@ document.addEventListener('click',e=>{
     if(!food||!amt)return;
     useFdc(food,fmtNum(amt)+' '+unit,unit==='oz'?amt*28.3495:amt);
     return;}
+
+  if(a==='mealinfo'){
+    const id=el.dataset.id;
+    if(openMeals.has(id))openMeals.delete(id);else openMeals.add(id);
+    render();return;}
+  if(a==='savemeal'){
+    mealSave={slot:el.dataset.meal,keep:true,name:''};
+    sheet='meal';render();
+    const box=document.querySelector('#mealname');if(box)box.focus();
+    return;}
+  if(a==='domealsave'){
+    const name=(document.querySelector('#mealname').value||'').trim();
+    if(!name){alert('Give the meal a name first.');return;}
+    const keep=document.querySelector('#mealkeep').checked;
+    const entries=logOf(date).filter(e=>e.meal===mealSave.slot);
+    if(entries.length<2)return;
+    const m=composeMeal(entries);
+    const i=S.foods.findIndex(x=>x.name.toLowerCase()===name.toLowerCase());
+    const rec={id:i>=0?S.foods[i].id:uid(),name,...m,barcode:null,last:Date.now()};
+    if(i>=0)S.foods[i]=rec;else S.foods.push(rec);
+    if(!keep)setLog(date,logOf(date).filter(e=>e.meal!==mealSave.slot));
+    save();sheet=null;render();return;}
 
   if(a==='wateropen'){sheet='water';render();return;}
   if(a==='water'){
@@ -1531,13 +1684,14 @@ document.addEventListener('click',e=>{
       const rec={id:i>=0?S.foods[i].id:uid(),name:String(x.name).trim(),
         serving:String(x.serving||'1 serving'),cal:nm(x.cal),p:nm(x.p),c:nm(x.c),f:nm(x.f),
         sug:nn(x.sug),add:nn(x.add),sat:nn(x.sat),
+        items:Array.isArray(x.items)&&x.items.length?x.items:undefined,
         barcode:x.barcode||null,last:i>=0?S.foods[i].last:0};
       if(i>=0){S.foods[i]=rec;updated++;}else{S.foods.push(rec);added++;}
     });
     save();note.textContent=`Added ${added}, updated ${updated}.`;box.value='';return;}
   if(a==='showlist'){
     document.querySelector('#pastebox').value=JSON.stringify(
-      S.foods.map(({name,serving,cal,p,c,f,sat,sug,add})=>({name,serving,cal,p,c,f,sat,sug,add})),null,1);
+      S.foods.map(({name,serving,cal,p,c,f,sat,sug,add,items})=>items?{name,serving,cal,p,c,f,sat,sug,add,items}:{name,serving,cal,p,c,f,sat,sug,add}),null,1);
     document.querySelector('#ionote').textContent='Copy this somewhere safe.';return;}
 
   if(a==='export'){exportData();return;}
@@ -1567,12 +1721,16 @@ document.addEventListener('keydown',e=>{
 /* live-typing inputs update state without a full re-render */
 document.addEventListener('input',e=>{
   if(e.target.id==='fq'){foodQuery=e.target.value;
-    const scroll=window.scrollY;render();window.scrollTo(0,scroll);
-    const el=document.querySelector('#fq');if(el){el.focus();el.setSelectionRange(el.value.length,el.value.length);}}
-  if(e.target.id==='sq'){sh.q=e.target.value;
-    render();const el=document.querySelector('#sq');
-    if(el){el.focus();el.setSelectionRange(el.value.length,el.value.length);}}
+    const box=document.querySelector('#foodslist');
+    if(box)box.innerHTML=foodsListHTML();}
+  if(e.target.id==='sq'){
+    sh.q=e.target.value;
+    /* collapse any open item; it may no longer be in the filtered set */
+    sh.sel=null;
+    const box=document.querySelector('#savedlist');
+    if(box)box.innerHTML=savedListHTML();}
   if(e.target.id==='fdq')sh.fq=e.target.value;
+  if(e.target.id==='mealname')mealSave.name=e.target.value;
   if(e.target.id==='qty'){setQtyFromAmt(e.target.value);updateQtyPreview();}
   if(e.target.id==='n_qty')setQtyFromAmt(e.target.value);
   if(e.target.id==='n_serving'&&sh.unit!=='serv'){setQtyFromAmt(document.querySelector('#n_qty').value);}
